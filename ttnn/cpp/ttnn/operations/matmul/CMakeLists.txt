@@ -24,6 +24,7 @@ target_sources(
             device/config/matmul_program_config.hpp
             device/config/matmul_program_config_types.hpp
             shared_with_host/activation_type.hpp
+            device/config/matmul_auto_tuner.hpp
         FILE_SET kernels
         TYPE HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
@@ -32,6 +33,7 @@ target_sources(
         matmul.cpp
         #
         device/config/matmul_program_config.cpp
+        device/config/matmul_auto_tuner.cpp
         device/matmul_device_operation.cpp
         device/utilities/matmul_utilities.cpp
         #factories
