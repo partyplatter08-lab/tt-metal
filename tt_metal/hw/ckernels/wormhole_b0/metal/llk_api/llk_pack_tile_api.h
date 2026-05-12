@@ -9,7 +9,11 @@
  * LLK PACK
  *************************************************************************/
 
-template <bool untilize = false, bool zero_output = false, bool tilize = false /*unused*/>
+template <
+    bool untilize = false,
+    bool zero_output = false,
+    bool tilize = false /*unused*/,
+    bool skip_addrmod_config = false>
 inline void llk_pack_init(const std::uint32_t pack_output = 16, std::uint32_t num_tiles = 1) {
     const std::uint32_t output_id = get_output_id(pack_output);
     const std::uint32_t face_r_dim = get_output_face_r_dim(output_id);
@@ -17,10 +21,12 @@ inline void llk_pack_init(const std::uint32_t pack_output = 16, std::uint32_t nu
     const bool partial_face = get_output_partial_face(output_id);
     const bool narrow_tile = get_output_narrow_tile(output_id);
 
-    LLK_ASSERT_BLOCK(are_packers_configured_correctly<PackerProgramType::ProgramByFace>(
-        pack_src_format[output_id], pack_dst_format[output_id], face_r_dim));
+    if constexpr (!skip_addrmod_config) {
+        LLK_ASSERT_BLOCK(are_packers_configured_correctly<PackerProgramType::ProgramByFace>(
+            pack_src_format[output_id], pack_dst_format[output_id], face_r_dim));
+    }
 
-    _llk_pack_init_<untilize, zero_output>(
+    _llk_pack_init_<untilize, zero_output, tilize, skip_addrmod_config>(
         pack_dst_format[output_id], face_r_dim, num_faces, partial_face, narrow_tile, num_tiles);
 }
 
