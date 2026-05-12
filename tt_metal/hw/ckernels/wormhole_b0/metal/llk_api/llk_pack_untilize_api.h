@@ -36,7 +36,7 @@ template <
     bool untilize = false,
     ReluType relu_type = ReluType::NO_RELU,
     std::uint32_t relu_threshold = 0,
-    bool tilize = false>
+    bool tilize = false /*unused*/>
 inline void llk_pack_untilize_hw_configure_disaggregated(
     std::uint32_t pack_output, std::uint32_t face_r_dim = 16, std::uint32_t num_faces = 4) {
     llk_pack_params_t llk_pack_params = {
@@ -46,7 +46,7 @@ inline void llk_pack_untilize_hw_configure_disaggregated(
                 .ApplyRelu = (std::uint32_t)relu_type,
                 .Threshold = relu_threshold,
             }}};
-    llk_pack_untilize_hw_configure<is_fp32_dest_acc_en, untilize, tilize>(&llk_pack_params, face_r_dim, num_faces);
+    llk_pack_untilize_hw_configure<is_fp32_dest_acc_en, untilize>(&llk_pack_params, face_r_dim, num_faces);
 }
 
 template <
