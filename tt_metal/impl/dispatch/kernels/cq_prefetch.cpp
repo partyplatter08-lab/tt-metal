@@ -1328,7 +1328,6 @@ uint32_t process_relay_linear_cmd(uint32_t cmd_ptr, uint32_t& downstream_data_pt
     uint32_t amt_to_read = (scratch_db_half_size > wlength) ? wlength : scratch_db_half_size;
     noc_async_read_set_trid(RELAY_LINEAR_TRIDS[0]);
     noc_read_64bit_any_len<true>(noc_xy_addr, read_addr, scratch_read_addr, amt_to_read);
-    noc_async_read_set_trid(0U);
 
     read_addr += amt_to_read;
     wlength -= amt_to_read;
@@ -1352,7 +1351,6 @@ uint32_t process_relay_linear_cmd(uint32_t cmd_ptr, uint32_t& downstream_data_pt
             amt_to_read = (scratch_db_half_size > read_length) ? read_length : scratch_db_half_size;
             noc_async_read_set_trid(RELAY_LINEAR_TRIDS[db_toggle]);
             noc_read_64bit_any_len<false>(noc_xy_addr, read_addr, scratch_read_addr, amt_to_read);
-            noc_async_read_set_trid(0U);
             read_addr += amt_to_read;
 
             noc_async_read_barrier_with_trid(RELAY_LINEAR_TRIDS[db_toggle ^ 1]);
@@ -1376,6 +1374,7 @@ uint32_t process_relay_linear_cmd(uint32_t cmd_ptr, uint32_t& downstream_data_pt
 
     // One page was acquired w/ the cmd in CMD_RELAY_INLINE_NOFLUSH
     DispatchRelayInlineState::cb_writer.release_pages(npages + 1, downstream_data_ptr);
+    noc_async_read_set_trid(0U);
 
     return CQ_PREFETCH_CMD_BARE_MIN_SIZE;
 }
