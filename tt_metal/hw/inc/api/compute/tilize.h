@@ -23,6 +23,9 @@
 #endif
 #include "llk_unpack_common_api.h"
 #endif
+#ifdef TRISC_PACK
+#include "llk_pack_tile_api.h"
+#endif
 #if defined(TRISC_PACK) && defined(ARCH_BLACKHOLE)
 #include "experimental/llk_pack_fast_tilize_api.h"
 #endif
