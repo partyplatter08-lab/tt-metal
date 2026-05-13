@@ -6,6 +6,7 @@
 #include "kernels/moe_ring_common.h"
 #include "moe_compute_device_operation.hpp"
 #include "moe_compute_program_factory.hpp"
+#include "ttnn/operations/ccl/common/host/moe_utils.hpp"
 #include "ttnn/operations/experimental/ccl/moe/selective_reduce_combine/device/selective_reduce_combine_device_operation.hpp"
 
 #include <tt-metalium/constants.hpp>
@@ -377,7 +378,7 @@ std::vector<ttnn::Tensor> moe_compute(
             .seq_size = total_tokens,
             .select_experts_k = select_experts_k,
             .experts = experts,
-            .num_links = num_links.value_or(4),
+            .num_links = num_links.value_or(ttnn::operations::ccl::common::get_num_links(*mesh_device, cluster_axis)),
             .axis = cluster_axis,
             .topology = topology.value_or(tt::tt_fabric::Topology::Ring),
             .num_token_parallel_cores = num_token_parallel_cores,

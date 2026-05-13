@@ -38,6 +38,7 @@ MESH_GRAPH_DESC_1x16 = (
 MESH_GRAPH_DESC_1x8 = (
     "tests/tt_metal/tt_fabric/custom_mesh_descriptors/single_galaxy_1x8_torus_graph_descriptor.textproto"
 )
+MESH_GRAPH_DESC_BH_LB = "tt_metal/fabric/mesh_graph_descriptors/single_bh_lb_mesh_graph_descriptor.textproto"
 
 # TODO (AM) this should go in a central location
 HIDDEN_TO_SHARD_INFO = {
@@ -1707,6 +1708,72 @@ def test_moe_compute_deepseek(
         output_width_shard_dim=output_width_shard_dim,
         dtype=dtype,
         enable_trace=enable_trace,
+        activation_type=activation_type,
+        has_bias=has_bias,
+    )
+
+
+# Test for Blackhole single Loudbox (2x4) - Phase 4 primary gate for #43444.
+# Reduced-scale fused MoE: correctness only, no perf gate at LB scale.
+@pytest.mark.skipif(
+    not is_mesh_graph_descriptor_set(MESH_GRAPH_DESC_BH_LB),
+    reason=f"BH Loudbox test requires TT_MESH_GRAPH_DESC_PATH={MESH_GRAPH_DESC_BH_LB}",
+)
+@pytest.mark.parametrize(
+    "device_params",
+    [
+        {
+            "dispatch_core_axis": ttnn.DispatchCoreAxis.COL,
+            "reliability_mode": ttnn.FabricReliabilityMode.RELAXED_INIT,
+            "fabric_config": ttnn.FabricConfig.FABRIC_1D_RING,
+        }
+    ],
+    indirect=True,
+)
+@pytest.mark.parametrize("mesh_shape, mesh_device", [((2, 4), (2, 4))], indirect=["mesh_device"])
+@pytest.mark.parametrize("cluster_axis", [0, 1])
+@pytest.mark.parametrize("has_bias", [False, True])
+def test_moe_compute_bh_lb(
+    mesh_device,
+    mesh_shape,
+    cluster_axis,
+    has_bias,
+):
+    """Phase 4 headline gate: full fused MoE on BH single Loudbox (2x4).
+
+    Reuses GPT-OSS shape (hidden_size=2880) since it has a HIDDEN_TO_SHARD_INFO entry.
+    num_links is auto-detected from the mesh (BH=2) by the op default.
+    """
+    # BH single-LB configuration (reduced scale)
+    experts_per_device = 2
+    tokens_per_device = 32
+    N = 2880
+    hidden_size = 2880
+    output_height_shard_dim = 4
+    output_width_shard_dim = 3  # GptRingConfig::OUTPUT_WIDTH_SHARD_DIM
+    dtype = ttnn.bfloat16
+    activation_type = MoEActivationFunction.SILU
+
+    # Correctness-only (no perf gate at LB scale)
+    selected_experts_k = 8
+    num_layers = 2
+    num_iterations = 2
+
+    run_moe_compute_test(
+        mesh_device=mesh_device,
+        mesh_shape=mesh_shape,
+        cluster_axis=cluster_axis,
+        experts_per_device=experts_per_device,
+        tokens_per_device=tokens_per_device,
+        selected_experts_k=selected_experts_k,
+        num_layers=num_layers,
+        num_iterations=num_iterations,
+        N=N,
+        hidden_size=hidden_size,
+        output_height_shard_dim=output_height_shard_dim,
+        output_width_shard_dim=output_width_shard_dim,
+        dtype=dtype,
+        enable_trace=False,
         activation_type=activation_type,
         has_bias=has_bias,
     )
