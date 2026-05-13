@@ -16,7 +16,7 @@ import ttnn
 MESH_GRAPH_DESC_1x16 = (
     "tests/tt_metal/tt_fabric/custom_mesh_descriptors/single_galaxy_1x16_torus_graph_descriptor.textproto"
 )
-MESH_GRAPH_DESC_BH_LB = "tt_metal/fabric/mesh_graph_descriptors/single_bh_lb_mesh_graph_descriptor.textproto"
+MESH_GRAPH_DESC_BH_LB = "tt_metal/fabric/mesh_graph_descriptors/single_bh_lb_1x8_mesh_graph_descriptor.textproto"
 MESH_GRAPH_DESC_1x8 = (
     "tests/tt_metal/tt_fabric/custom_mesh_descriptors/single_galaxy_1x8_torus_graph_descriptor.textproto"
 )
@@ -684,13 +684,13 @@ def _run_test(
             id="1x16",
         ),
         pytest.param(
-            (2, 4),
-            (2, 4),
+            (1, 8),
+            (1, 8),
             marks=pytest.mark.skipif(
                 not is_mesh_graph_descriptor_set(MESH_GRAPH_DESC_BH_LB),
-                reason=f"2x4 BH LB mesh requires TT_MESH_GRAPH_DESC_PATH={MESH_GRAPH_DESC_BH_LB}",
+                reason=f"1x8 BH LB mesh requires TT_MESH_GRAPH_DESC_PATH={MESH_GRAPH_DESC_BH_LB}",
             ),
-            id="2x4",
+            id="bh_lb_1x8",
         ),
     ],
     indirect=["mesh_device"],

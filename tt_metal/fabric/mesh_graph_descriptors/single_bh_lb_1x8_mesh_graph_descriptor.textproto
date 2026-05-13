@@ -1,0 +1,18 @@
+# --- Meshes ---------------------------------------------------------------
+# One 1x8 mesh on a single host — single BH Loudbox exposed as a 1D line
+# (8 devices, 2 fabric channels). Mirrors the 1x8 logical view used by
+# bh_lbx2_1x16 (which is 1x8 per host x 2 hosts). 1D shape matches the
+# WH GPT-OSS 1x8 test routing, avoiding 2D replication-aware golden logic.
+mesh_descriptors {
+  name: "M0"
+  arch: BLACKHOLE
+  device_topology { dims: [ 1, 8 ] }
+  host_topology   { dims: [ 1, 1 ] }
+  channels {
+    count: 2
+    policy: RELAXED
+  }
+}
+
+# --- Instantiation --------------------------------------------------------
+top_level_instance { mesh { mesh_descriptor: "M0" mesh_id: 0 } }

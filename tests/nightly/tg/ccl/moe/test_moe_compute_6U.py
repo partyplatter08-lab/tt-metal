@@ -38,7 +38,7 @@ MESH_GRAPH_DESC_1x16 = (
 MESH_GRAPH_DESC_1x8 = (
     "tests/tt_metal/tt_fabric/custom_mesh_descriptors/single_galaxy_1x8_torus_graph_descriptor.textproto"
 )
-MESH_GRAPH_DESC_BH_LB = "tt_metal/fabric/mesh_graph_descriptors/single_bh_lb_mesh_graph_descriptor.textproto"
+MESH_GRAPH_DESC_BH_LB = "tt_metal/fabric/mesh_graph_descriptors/single_bh_lb_1x8_mesh_graph_descriptor.textproto"
 
 # TODO (AM) this should go in a central location
 HIDDEN_TO_SHARD_INFO = {
@@ -1730,8 +1730,8 @@ def test_moe_compute_deepseek(
     ],
     indirect=True,
 )
-@pytest.mark.parametrize("mesh_shape, mesh_device", [((2, 4), (2, 4))], indirect=["mesh_device"])
-@pytest.mark.parametrize("cluster_axis", [0, 1])
+@pytest.mark.parametrize("mesh_shape, mesh_device", [((1, 8), (1, 8))], indirect=["mesh_device"])
+@pytest.mark.parametrize("cluster_axis", [1])
 @pytest.mark.parametrize("has_bias", [False, True])
 def test_moe_compute_bh_lb(
     mesh_device,
@@ -1739,8 +1739,11 @@ def test_moe_compute_bh_lb(
     cluster_axis,
     has_bias,
 ):
-    """Phase 4 headline gate: full fused MoE on BH single Loudbox (2x4).
+    """Phase 4 headline gate: full fused MoE on BH single Loudbox (1x8 logical view).
 
+    The physical 2x4 LB is exposed as a 1x8 line via `single_bh_lb_1x8_mesh_graph_descriptor.textproto`
+    so the test reuses the WH-validated 1D routing path (the 2D golden helpers
+    `gen_sparse_buffer_and_indices` / `get_linearized_mesh_coord` only handle 1xN meshes).
     Reuses GPT-OSS shape (hidden_size=2880) since it has a HIDDEN_TO_SHARD_INFO entry.
     num_links is auto-detected from the mesh (BH=2) by the op default.
     """
