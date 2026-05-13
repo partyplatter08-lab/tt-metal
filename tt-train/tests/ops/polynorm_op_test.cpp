@@ -37,8 +37,8 @@ protected:
 };
 
 namespace {
-constexpr float kForwardRtol = 2.5e-2F;
-constexpr float kForwardAtol = 2.5e-2F;
+constexpr float kForwardRtol = 1.25e-2F;
+constexpr float kForwardAtol = 1.25e-2F;
 constexpr float kBackwardRtol = 5.0e-3F;
 constexpr float kBackwardAtol = 5.0e-3F;
 
