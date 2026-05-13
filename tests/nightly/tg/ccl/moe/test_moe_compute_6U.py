@@ -38,7 +38,7 @@ MESH_GRAPH_DESC_1x16 = (
 MESH_GRAPH_DESC_1x8 = (
     "tests/tt_metal/tt_fabric/custom_mesh_descriptors/single_galaxy_1x8_torus_graph_descriptor.textproto"
 )
-MESH_GRAPH_DESC_BH_LB = "tt_metal/fabric/mesh_graph_descriptors/single_bh_lb_1x8_mesh_graph_descriptor.textproto"
+MESH_GRAPH_DESC_BH_LB = "tt_metal/fabric/mesh_graph_descriptors/p150_x8_mesh_graph_descriptor.textproto"
 
 # TODO (AM) this should go in a central location
 HIDDEN_TO_SHARD_INFO = {
@@ -1730,7 +1730,7 @@ def test_moe_compute_deepseek(
     ],
     indirect=True,
 )
-@pytest.mark.parametrize("mesh_shape, mesh_device", [((1, 8), (1, 8))], indirect=["mesh_device"])
+@pytest.mark.parametrize("mesh_shape, mesh_device", [((2, 4), (2, 4))], indirect=["mesh_device"])
 @pytest.mark.parametrize("cluster_axis", [1])
 @pytest.mark.parametrize("has_bias", [False, True])
 def test_moe_compute_bh_lb(
@@ -1739,13 +1739,28 @@ def test_moe_compute_bh_lb(
     cluster_axis,
     has_bias,
 ):
-    """Phase 4 headline gate: full fused MoE on BH single Loudbox (1x8 logical view).
+    """Phase 4 headline gate: full fused MoE on BH single Loudbox (#43444).
 
-    The physical 2x4 LB is exposed as a 1x8 line via `single_bh_lb_1x8_mesh_graph_descriptor.textproto`
-    so the test reuses the WH-validated 1D routing path (the 2D golden helpers
-    `gen_sparse_buffer_and_indices` / `get_linearized_mesh_coord` only handle 1xN meshes).
-    Reuses GPT-OSS shape (hidden_size=2880) since it has a HIDDEN_TO_SHARD_INFO entry.
-    num_links is auto-detected from the mesh (BH=2) by the op default.
+    Uses the canonical `p150_x8_mesh_graph_descriptor.textproto` — BH single LB POR
+    is a 2x4 LINE/LINE mesh with no physical ring closure (per
+    `tt-CableGen/defined_topologies/README.md`). The MoE op defaults to Topology::Ring
+    but `ttnn::ccl::get_usable_topology()` (ccl_common.cpp:77) auto-downgrades to
+    Linear when the mesh shape can't support a ring.
+
+    Known limitations on POR single LB (require op-side follow-up before this test
+    can pass end-to-end):
+    - `selective_reduce_combine_program_factory.cpp:259` and
+      `moe_compute_program_factory.cpp:449` compute `experts_per_device` from full
+      mesh `num_devices_total` instead of cluster-axis-aware `mesh_shape[cluster_axis]`,
+      so DP-replication on a 2D mesh isn't honored by kernel work distribution
+      (output spec IS axis-aware — internal contradiction).
+    - selective_reduce_combine kernels assume 2-neighbor mux configuration; LINE
+      endpoints have 1 neighbor, which the kernel pattern doesn't support today.
+
+    For now this test serves as documentation of the target config; the skipif gate
+    ensures it stays opt-in via `TT_MESH_GRAPH_DESC_PATH=...p150_x8...`.
+    cluster_axis=[1] only — cax=0 has a separate `get_linearized_mesh_coord` bug.
+    Reuses GPT-OSS shape (hidden_size=2880) for the existing HIDDEN_TO_SHARD_INFO entry.
     """
     # BH single-LB configuration (reduced scale)
     experts_per_device = 2
