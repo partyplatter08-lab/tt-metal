@@ -250,12 +250,18 @@ std::vector<Tensor> sort(
     const bool stable,
     const std::optional<MemoryConfig>& memory_config,
     std::optional<std::tuple<Tensor&, Tensor&>> optional_output_tensors) {
+    TT_FATAL(!stable, "ttnn::sort: stable=True is not yet implemented.");
+
     const ttnn::Shape& original_lshape = input_tensor.logical_shape();
     const auto rank = input_tensor.logical_shape().rank();
 
+    // FLOAT32 inputs require UINT32 indices (device-side validation enforces this for the
+    // non-early-exit path; keep early exits consistent).
+    const DataType index_dtype = (input_tensor.dtype() == DataType::FLOAT32) ? DataType::UINT32 : DataType::UINT16;
+
     // Check for early exit for scalar or empty tensors tensors
     if ((original_lshape == ttnn::Shape{}) || (original_lshape == ttnn::Shape{1})) {
-        auto indices = ttnn::zeros_like(input_tensor, DataType::UINT16);
+        auto indices = ttnn::zeros_like(input_tensor, index_dtype);
         if (operations::data_movement::CMAKE_UNIQUE_NAMESPACE::validate_optional_output_tensors_for_early_exit(
                 optional_output_tensors, original_lshape)) {
             std::get<0>(*optional_output_tensors) = input_tensor;
@@ -265,9 +271,15 @@ std::vector<Tensor> sort(
         return {input_tensor, indices};
     }
 
-    const int8_t normalized_dim = dim < 0 ? rank + dim : dim;
+    TT_FATAL(
+        dim >= -static_cast<int8_t>(rank) && dim < static_cast<int8_t>(rank),
+        "Sort dim {} is out of range for rank-{} tensor",
+        dim,
+        rank);
+
+    const int32_t normalized_dim = dim < 0 ? static_cast<int32_t>(rank) + dim : dim;
     if (original_lshape[normalized_dim] == 1) {
-        auto indices = ttnn::zeros_like(input_tensor, DataType::UINT16);
+        auto indices = ttnn::zeros_like(input_tensor, index_dtype);
         if (operations::data_movement::CMAKE_UNIQUE_NAMESPACE::validate_optional_output_tensors_for_early_exit(
                 optional_output_tensors, original_lshape)) {
             std::get<0>(*optional_output_tensors) = input_tensor;
