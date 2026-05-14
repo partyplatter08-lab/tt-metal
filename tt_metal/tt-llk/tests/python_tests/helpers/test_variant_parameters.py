@@ -123,6 +123,22 @@ class EN_DEST_REUSE(TemplateParameter):
         return "#define EN_DEST_REUSE"
 
 
+@dataclass
+class SFPU_INT_OP(TemplateParameter):
+    """Emit a #define to select the integer SFPU operation in a shared C++ test source.
+
+    Supported values: "MUL", "GT", "LT", "LE", "GE".  When omitted the C++ source
+    falls through to its default (add_int) path.
+    """
+
+    op: str = ""
+
+    def convert_to_cpp(self) -> str:
+        if self.op:
+            return f"#define SFPU_INT_OP_{self.op.upper()}"
+        return ""
+
+
 def _generate_operation_constants(mathop: MathOperation) -> list[str]:
     """Generate the appropriate operation constants based on the math operation type."""
     constants = []
@@ -484,17 +500,6 @@ class TILE_COUNT(RuntimeParameter):
 
     def convert_to_struct_fields(self) -> tuple[str, str]:
         return f"std::uint32_t TILE_CNT;", "I"
-
-
-@dataclass
-class NUM_GUARD_TILES(RuntimeParameter):
-    count: int = 0
-
-    def convert_to_cpp(self) -> str:
-        return f"constexpr std::uint32_t NUM_GUARD_TILES = {self.count};"
-
-    def convert_to_struct_fields(self) -> tuple[str, str]:
-        return f"std::uint32_t NUM_GUARD_TILES;", "I"
 
 
 @dataclass
