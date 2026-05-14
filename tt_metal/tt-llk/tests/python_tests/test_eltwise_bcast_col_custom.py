@@ -4,7 +4,6 @@
 import logging
 from dataclasses import dataclass
 
-import pytest
 import torch
 from helpers.format_config import DataFormat
 from helpers.golden_generators import (
@@ -58,9 +57,6 @@ class CT_DIM(TemplateParameter):
     dest_acc=[DestAccumulation.No],
     math_fidelity=[
         MathFidelity.LoFi,
-        MathFidelity.HiFi2,
-        MathFidelity.HiFi3,
-        MathFidelity.HiFi4,
     ],
     broadcast_type=[BroadcastType.Column],
     input_dimensions_A=[[32, w] for w in range(32, 257, 32)],
@@ -76,9 +72,6 @@ def test_eltwise_bcast_col_custom(
     input_dimensions_A,
     input_dimensions_B,
 ):
-    if mathop != MathOperation.Elwmul and math_fidelity != MathFidelity.LoFi:
-        pytest.skip("Fidelity does not affect Elwadd and Elwsub operations")
-
     ct_dim = input_dimensions_A[1] // 32
     logger.info(
         "Running ct_dim=%d  srcA=%s  srcB=%s",

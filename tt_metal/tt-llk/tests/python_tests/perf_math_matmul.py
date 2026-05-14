@@ -4,7 +4,7 @@
 from itertools import chain, product
 
 import pytest
-from helpers.format_config import DataFormat, is_dest_acc_needed
+from helpers.format_config import DataFormat
 from helpers.llk_params import (
     DestAccumulation,
     DestSync,
@@ -106,9 +106,6 @@ def test_perf_math_matmul(
     num_faces_in0 = matmul_config.face_layout_config.num_faces_in0
     num_faces_in1 = matmul_config.face_layout_config.num_faces_in1
     num_faces = matmul_config.face_layout_config.num_faces
-
-    if is_dest_acc_needed(formats) and matmul_config.dest_acc == DestAccumulation.No:
-        pytest.skip("Dest accumulation must be enabled for this format")
 
     run_types = [
         PerfRunType.L1_TO_L1,

@@ -88,6 +88,29 @@ all_params: list[dict] = [
     for ptype in pool_types
     for uop in unary_ops
 ]
+all_params = [
+    cfg
+    for cfg in all_params
+    if not (cfg["unary_op"] == MathOperation.Sin and cfg["pool_type"] == ReducePool.Sum)
+    and not (
+        cfg["unary_op"] == MathOperation.Square
+        and cfg["reduce_dim"] == ReduceDimension.Scalar
+        and cfg["pool_type"] == ReducePool.Sum
+    )
+    and not (
+        cfg["formats"].input_format
+        == cfg["formats"].output_format
+        == DataFormat.Float16
+        and cfg["unary_op"]
+        in [
+            MathOperation.Log,
+            MathOperation.Sqrt,
+            MathOperation.Square,
+            MathOperation.Hardsigmoid,
+        ]
+        and get_chip_architecture() == ChipArchitecture.BLACKHOLE
+    )
+]
 
 param_ids = [
     f"{cfg['reduce_dim'].name}|{cfg['pool_type'].name}|{cfg['unary_op'].name}"
@@ -111,39 +134,11 @@ _reduce_to_mathop = {
 def test_reduce_sfpu_unary(config):
     """Run the fused Reduce+SFPU kernel on Tensix and compare with golden."""
 
-    if (
-        config["unary_op"] in [MathOperation.Sin]
-        and config["pool_type"] == ReducePool.Sum
-    ):
-        pytest.skip("Sin or Log operation is not supported on column or row reduce")
-    if (
-        config["unary_op"] in [MathOperation.Square]
-        and config["reduce_dim"] == ReduceDimension.Scalar
-        and config["pool_type"] == ReducePool.Sum
-    ):
-        pytest.skip("Square operation is not supported on scalar reduce")
-
     # ------------------------- Extract config ------------------------------
     fmt: InputOutputFormat = config["formats"]
     reduce_dim: ReduceDimension = config["reduce_dim"]
     pool_type: ReducePool = config["pool_type"]
     unary_op: MathOperation = config["unary_op"]
-
-    # ------------------------- Skip conditions -----------------------------
-
-    # Skip certain operations on Blackhole with specific format combinations
-    if (
-        fmt.input_format == fmt.output_format == DataFormat.Float16
-        and unary_op
-        in [
-            MathOperation.Log,
-            MathOperation.Sqrt,
-            MathOperation.Square,
-            MathOperation.Hardsigmoid,
-        ]
-        and get_chip_architecture() == ChipArchitecture.BLACKHOLE
-    ):
-        pytest.skip("BFP8 does not support certain operations on Blackhole")
 
     # --------------------- Generate input stimuli -------------------------
     input_dimensions = [32, 32]

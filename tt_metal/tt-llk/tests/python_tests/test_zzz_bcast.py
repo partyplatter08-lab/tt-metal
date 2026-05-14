@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-import pytest
 import torch
 from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.format_config import DataFormat
@@ -56,6 +55,35 @@ supported_formats = [
     DataFormat.Bfp8_b,
 ]
 
+
+def get_bcast_dest_acc_modes(formats, broadcast_type):
+    if (
+        get_chip_architecture() == ChipArchitecture.WORMHOLE
+        and broadcast_type == BroadcastType.Row
+        and formats.input_format in (DataFormat.Float16_b, DataFormat.Bfp8_b)
+    ):
+        return [DestAccumulation.No]
+    return [DestAccumulation.Yes, DestAccumulation.No]
+
+
+def get_bcast_types(tile_dimensions):
+    if tile_dimensions != [32, 32]:
+        return [BroadcastType.None_, BroadcastType.Row, BroadcastType.Scalar]
+    return [
+        BroadcastType.None_,
+        BroadcastType.Column,
+        BroadcastType.Row,
+        BroadcastType.Scalar,
+    ]
+
+
+def get_bcast_formats(tile_dimensions):
+    formats = input_output_formats(supported_formats, same=True)
+    if tile_dimensions[0] < 16:
+        return [f for f in formats if f.input_format != DataFormat.Bfp8_b]
+    return formats
+
+
 # Sweep tile dimensions from tiny ([1,32]..[16,32]) through full ([32,32]).
 # Tiny tiles have fewer faces (num_faces=2) and variable face_r_dim;
 # full 32x32 tiles have 4 faces with face_r_dim=16.
@@ -66,14 +94,11 @@ supported_formats = [
     # enable tiny tiles tests when they're added formally to the LLKs
     # tile_dimensions=[[1, 32], [2, 32], [4, 32], [8, 32], [16, 32], [32, 32]],
     tile_dimensions=[[32, 32]],
-    formats=input_output_formats(supported_formats, same=True),
-    broadcast_type=[
-        BroadcastType.None_,
-        BroadcastType.Column,
-        BroadcastType.Row,
-        BroadcastType.Scalar,
-    ],
-    dest_acc=[DestAccumulation.Yes, DestAccumulation.No],
+    formats=lambda tile_dimensions: get_bcast_formats(tile_dimensions),
+    broadcast_type=lambda tile_dimensions: get_bcast_types(tile_dimensions),
+    dest_acc=lambda formats, broadcast_type: get_bcast_dest_acc_modes(
+        formats, broadcast_type
+    ),
 )
 def test_unpack_bcast(
     tile_dimensions,
@@ -81,36 +106,6 @@ def test_unpack_bcast(
     broadcast_type,
     dest_acc,
 ):
-    # --- Skips -----------------------------------------------------------
-
-    if dest_acc == DestAccumulation.No and formats.input_format in (
-        DataFormat.Float32,
-        DataFormat.Int32,
-        DataFormat.UInt32,
-    ):
-        pytest.skip("32-bit formats require dest accumulation")
-
-    # --- Skips from bugs --------------------------------------------------
-
-    # TODO: pgardner - Column broadcast for tiny tiles needs kernel support
-    if tile_dimensions != [32, 32] and broadcast_type == BroadcastType.Column:
-        pytest.skip("Column broadcast not yet implemented for tiny tiles")
-
-    # TODO: pgardner - Bfp8_b requires minimum 16 exponents per face
-    if tile_dimensions[0] < 16 and formats.input_format == DataFormat.Bfp8_b:
-        pytest.skip("Bfp8_b not supported for tile height < 16")
-
-    # TODO: pgardner - known WH issue with row broadcast + dest accumulation
-    if (
-        get_chip_architecture() == ChipArchitecture.WORMHOLE
-        and broadcast_type == BroadcastType.Row
-        and dest_acc == DestAccumulation.Yes
-        and formats.input_format in (DataFormat.Float16_b, DataFormat.Bfp8_b)
-    ):
-        pytest.skip(
-            "Row broadcast with dest_acc=Yes broken on Wormhole for Float16_b/Bfp8_b"
-        )
-
     # --- Tile geometry ---------------------------------------------------
     # get_tile_params returns (face_r_dim, num_faces_r_dim, num_faces_c_dim).
     # For tiny tiles (e.g. [4,32]): face_r_dim=4, num_faces=2.

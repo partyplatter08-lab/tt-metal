@@ -34,6 +34,17 @@ def get_dest_accum_modes(formats):
     return [DestAccumulation.Yes, DestAccumulation.No]
 
 
+def get_dest_acc_add_top_row(formats):
+    """
+    SfpuAddTopRow: Blackhole does not support DestAccumulation.No (see perf test skip).
+    Integer same-format paths only expose No — those yield no BH cases (same as skip-all).
+    """
+    modes = get_dest_accum_modes(formats)
+    if get_chip_architecture() == ChipArchitecture.BLACKHOLE:
+        modes = [m for m in modes if m != DestAccumulation.No]
+    return modes
+
+
 @pytest.mark.perf
 @parametrize(
     formats=input_output_formats(
@@ -228,7 +239,7 @@ def test_perf_eltwise_binary_sfpu_int(
     mathop=[
         MathOperation.SfpuAddTopRow,
     ],
-    dest_acc=lambda formats: get_dest_accum_modes(formats),
+    dest_acc=lambda formats: get_dest_acc_add_top_row(formats),
     loop_factor=[
         16,
     ],
@@ -249,14 +260,6 @@ def test_perf_eltwise_binary_sfpu_add_top_row(
     iterations,
     input_dimensions,
 ):
-    chip_arch = get_chip_architecture()
-
-    # Skip DestAccumulation.No on Blackhole for SfpuAddTopRow
-    if chip_arch == ChipArchitecture.BLACKHOLE and dest_acc == DestAccumulation.No:
-        pytest.skip(
-            "DestAccumulation.No is not supported for SfpuAddTopRow on Blackhole"
-        )
-
     unpack_to_dest = (
         formats.input_format.is_32_bit() and dest_acc == DestAccumulation.No
     )

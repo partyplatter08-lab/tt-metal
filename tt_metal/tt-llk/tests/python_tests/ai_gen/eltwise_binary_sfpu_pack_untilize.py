@@ -88,6 +88,18 @@ all_params = [
         MathFidelity.HiFi4,
     ]
 ]
+all_params = [
+    p
+    for p in all_params
+    if p["formats"].output_format != DataFormat.Bfp8_b
+    and not (
+        p["mathop"] == MathOperation.Elwmul and p["unary_op"] == MathOperation.Square
+    )
+    and not (
+        p["mathop"] in [MathOperation.Elwadd, MathOperation.Elwsub]
+        and p["math_fidelity"] != MathFidelity.LoFi
+    )
+]
 
 param_ids = [
     f"bin={p['mathop'].name}|un={p['unary_op'].name}|fmt={p['formats'].input_format.name}->{p['formats'].output_format.name}|acc={p['dest_acc'].name}|sync={p['dst_sync'].name}|fid={p['math_fidelity'].name}"
@@ -112,20 +124,6 @@ def test_sweep_test(config):
     dest_acc = config["dest_acc"]
     dst_sync = config["dst_sync"]
     math_fidelity = config["math_fidelity"]
-
-    # Skip unsupported output Bfp8_b
-    if formats.output_format == DataFormat.Bfp8_b:
-        pytest.skip("Pack untilize does not support Bfp8_b as output format")
-
-    if mathop == MathOperation.Elwmul and unary_op == MathOperation.Square:
-        pytest.skip("Elwmul and Square are not supported together")
-
-    # Fidelity irrelevant for add/sub – mirror behaviour of other tests
-    if (
-        mathop in [MathOperation.Elwadd, MathOperation.Elwsub]
-        and math_fidelity != MathFidelity.LoFi
-    ):
-        pytest.skip("Math fidelity does not affect Elwadd/Elwsub")
 
     input_dimensions = [32, 32]
 

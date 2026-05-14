@@ -3,6 +3,7 @@
 
 import pytest
 import torch
+from conftest import wormhole_only
 from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.format_config import DataFormat
 from helpers.golden_generators import TILE_DIMENSIONS
@@ -192,12 +193,10 @@ def test_pack_dest_bank(
     tilize=[Tilize.No],
     dest_index=0,
 )
+@wormhole_only
 def test_pack_dest_bank_two_blocked_packs_of_4(
     formats, dest_acc, l1_acc, num_faces, tilize, dest_index
 ):
-    if get_chip_architecture() != ChipArchitecture.WORMHOLE:
-        pytest.skip("Wormhole-specific blocked pack regression")
-
     input_dimensions = [128, 64]
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,

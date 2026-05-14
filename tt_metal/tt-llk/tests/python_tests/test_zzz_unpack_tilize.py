@@ -1,6 +1,5 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
-import pytest
 import torch
 from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.format_config import DataFormat
@@ -30,36 +29,40 @@ from helpers.test_variant_parameters import (
 from helpers.utils import passed_test
 
 
-@parametrize(
-    formats=input_output_formats(
+def _unpack_tilize_float_formats():
+    formats = input_output_formats(
         [
             DataFormat.Float16_b,
             DataFormat.Float16,
             DataFormat.Float32,
-            DataFormat.Bfp8_b,  # Unpack Tilize doesn't work for block float formats (Bfp8_b) due to shared exponent at start of input tensor
+            DataFormat.Bfp8_b,
             DataFormat.Fp8_e4m3,
         ]
-    ),
-    num_faces=[2, 4],
+    )
+    if get_chip_architecture() != ChipArchitecture.BLACKHOLE:
+        formats = [
+            f
+            for f in formats
+            if f.input_format != DataFormat.Fp8_e4m3
+            and f.output_format != DataFormat.Fp8_e4m3
+        ]
+    return [f for f in formats if f.input_format != DataFormat.Bfp8_b]
+
+
+def _unpack_tilize_num_faces(formats):
+    if formats.output_format == DataFormat.Bfp8_b:
+        return [FACES_PER_TILE]
+    return [2, 4]
+
+
+@parametrize(
+    formats=_unpack_tilize_float_formats(),
+    num_faces=lambda formats: _unpack_tilize_num_faces(formats),
 )
 def test_unpack_tilize_float(
     formats,
     num_faces,
 ):
-    if (
-        formats.input_format == DataFormat.Fp8_e4m3
-        or formats.output_format == DataFormat.Fp8_e4m3
-    ) and get_chip_architecture() != ChipArchitecture.BLACKHOLE:
-        pytest.skip(
-            "Unpack Tilize does not support Fp8_e4m3 format on non-BLACKHOLE architectures"
-        )
-
-    if formats.input_format == DataFormat.Bfp8_b:
-        pytest.skip("Unpack Tilize does not support Bfp8_b input format")
-
-    if formats.output_format == DataFormat.Bfp8_b and num_faces != FACES_PER_TILE:
-        pytest.skip("Bfp8_b output format only works with num_faces=4")
-
     unpack_tilize(formats, num_faces=num_faces)
 
 

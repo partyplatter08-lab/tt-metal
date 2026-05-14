@@ -1,9 +1,7 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-import pytest
 import torch
-from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.constraints import get_valid_dest_accumulation_modes
 from helpers.data_format_inference import infer_data_formats
 from helpers.format_config import DataFormat
@@ -19,6 +17,7 @@ from helpers.llk_params import (
     format_dict,
 )
 from helpers.param_config import (
+    exclude_fp8_e4m3_on_wormhole,
     get_num_blocks_and_num_tiles_in_block,
     input_output_formats,
     parametrize,
@@ -36,18 +35,52 @@ from helpers.test_variant_parameters import (
 from helpers.utils import passed_test
 
 
-@parametrize(
-    formats=input_output_formats(
+def _pack_untilize_zzz_formats():
+    """Valid I/O format pairs: no Bfp8_b output, no Int32 mixing, no Fp8_e4m3 on Wormhole."""
+    base = input_output_formats(
         [
             DataFormat.Float16_b,
             DataFormat.Float16,
-            DataFormat.Float32,  # Test Float32 with both 32bit mode dest (full precision) and 16bit mode dest (precision loss)
+            DataFormat.Float32,
             DataFormat.Int32,
             DataFormat.Bfp8_b,
             DataFormat.Fp8_e4m3,
-        ]  # Pack Untilize doesn't work for block float formats (Bfp8_b); we only include as input format in our test
-    ),
-    dest_acc=lambda formats: get_valid_dest_accumulation_modes(formats),
+        ]
+    )
+    base = exclude_fp8_e4m3_on_wormhole(base)
+    return [
+        f
+        for f in base
+        if f.output_format != DataFormat.Bfp8_b
+        and not (
+            (f.input_format == DataFormat.Int32) ^ (f.output_format == DataFormat.Int32)
+        )
+    ]
+
+
+def _pack_untilize_zzz_dest_acc_modes(formats):
+    modes = get_valid_dest_accumulation_modes(formats)
+    valid_modes = []
+    for dest_acc in modes:
+        data_formats = infer_data_formats(
+            formats.input_format,
+            formats.output_format,
+            dest_acc,
+            False,
+        )
+        if (
+            formats.input_format == DataFormat.Float16
+            and data_formats.pack_src.is_32_bit()
+            and dest_acc == DestAccumulation.No
+        ):
+            continue
+        valid_modes.append(dest_acc)
+    return valid_modes
+
+
+@parametrize(
+    formats=_pack_untilize_zzz_formats(),
+    dest_acc=lambda formats: _pack_untilize_zzz_dest_acc_modes(formats),
     input_dimensions=[[64, 64], [32, 128], [128, 128], [32, 64]],
     #  TODO add DestSync::Full tests when we have a solution for the static_assert in _llk_pack_untilize_init_ that requires block_ct_dim to be less or equal to 8,
     #  which is currently a limitation for testing DestSync::Full with the Untilize blocks calculation algorithm.
@@ -61,54 +94,12 @@ def test_pack_untilize(
     dest_sync,
     tile_dst_ct_offset,
 ):
-    if TestConfig.WITH_COVERAGE and input_dimensions == [64, 512]:
-        pytest.skip(
-            "Skipping large dimension test in coverage mode, check issue: #1063 on TT-LLK repo"
-        )
-
-    if get_chip_architecture() == ChipArchitecture.WORMHOLE and (
-        formats.input_format == DataFormat.Fp8_e4m3
-        or formats.output_format == DataFormat.Fp8_e4m3
-    ):
-        pytest.skip("Fp8_e4m3 not supported on wormhole")
-
-    if formats.output_format == DataFormat.Bfp8_b:
-        pytest.skip("Pack Untilize does not support Bfp8_b format")
-
-    if (formats.input_format == DataFormat.Int32) ^ (
-        formats.output_format == DataFormat.Int32
-    ):
-        pytest.skip("Pack Untilize does not support mixing Int32 with other formats")
-
     data_formats = infer_data_formats(
         formats.input_format,
         formats.output_format,
         dest_acc,
         False,
     )
-
-    # Handling a hardware limitation: cannot convert 8-bit exponent datums to Float16 without storing them as intermediate Float32 in dest register.
-    # For wormhole architecture, gasket cannot perform this conversion and packer takes input Float32 (from dest register) converting to Float16_A.
-    # For blackhole architecture, gasket is able to convert Float32 to Float16_A before packing (reduces work on packer).`
-    if (
-        formats.input_format == DataFormat.Float16
-        and data_formats.pack_src.is_32_bit()
-        and dest_acc == DestAccumulation.No
-    ):
-        pytest.skip(
-            "Due to hardware limitation, cannot convert 8-bit exponent datums to Float16 without storing them as intermediate Float32 in dest register. Therefore using dest_acc=No is not supported in this case."
-        )
-
-    # TODO: Checkout issue #1405 on tt-llk.
-    if (
-        get_chip_architecture() == ChipArchitecture.WORMHOLE
-        and formats.input_format
-        in (DataFormat.Float16_b, DataFormat.Float16, DataFormat.Bfp8_b)
-        and formats.output_format == DataFormat.Float32
-        and dest_acc == DestAccumulation.No
-        and input_dimensions == [64, 512]
-    ):
-        pytest.skip("Wormhole pack_untilize does not support this format combination.")
 
     sfpu_false_spec = StimuliSpec.uniform(low=0.0, high=1.0)
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(

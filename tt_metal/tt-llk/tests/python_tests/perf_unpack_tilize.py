@@ -14,16 +14,25 @@ from helpers.test_variant_parameters import (
 )
 
 
+def _unpack_tilize_float_formats():
+    """Excludes Bfp8_b as unpack input (unsupported); keeps Bfp8_b as output where applicable."""
+    return [
+        f
+        for f in input_output_formats(
+            [
+                DataFormat.Float16_b,
+                DataFormat.Float16,
+                DataFormat.Float32,
+                DataFormat.Bfp8_b,
+            ]
+        )
+        if f.input_format != DataFormat.Bfp8_b
+    ]
+
+
 @pytest.mark.perf
 @parametrize(
-    formats=input_output_formats(
-        [
-            DataFormat.Float16_b,
-            DataFormat.Float16,
-            DataFormat.Float32,
-            DataFormat.Bfp8_b,
-        ]
-    ),
+    formats=_unpack_tilize_float_formats(),
     rt_dim=[1, 2, 3, 4, 5, 6, 7, 8],
     ct_dim=[1, 2, 3, 4, 5, 6, 7, 8],
 )
@@ -33,9 +42,6 @@ def test_perf_unpack_tilize_float(
     rt_dim,
     ct_dim,
 ):
-    if formats.input_format == DataFormat.Bfp8_b:
-        pytest.skip("Bfp8_b input not supported for unpack_tilize")
-
     _perf_unpack_tilize(
         perf_report,
         formats,

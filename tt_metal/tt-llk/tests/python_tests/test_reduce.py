@@ -3,7 +3,6 @@
 
 import math
 
-import pytest
 import torch
 from helpers.format_config import DataFormat, is_dest_acc_needed
 from helpers.golden_generators import ReduceGolden, get_golden_generator
@@ -47,6 +46,18 @@ mathop_mapping = {
 }
 
 
+def _reduce_math_fidelities(formats):
+    fidelities = [
+        MathFidelity.LoFi,
+        MathFidelity.HiFi2,
+        MathFidelity.HiFi3,
+        MathFidelity.HiFi4,
+    ]
+    if formats.input_format in [DataFormat.Float16_b, DataFormat.Float32]:
+        return [f for f in fidelities if f != MathFidelity.LoFi]
+    return fidelities
+
+
 @parametrize(
     tile_dimensions=[[1, 32], [2, 32], [4, 32], [8, 32], [16, 32], [32, 32], [32, 16]],
     formats=input_output_formats(
@@ -59,12 +70,7 @@ mathop_mapping = {
     is_reduce_to_one=[False, True],
     reduce_dim=[ReduceDimension.Row, ReduceDimension.Column, ReduceDimension.Scalar],
     pool_type=[ReducePool.Max, ReducePool.Average, ReducePool.Sum],
-    math_fidelity=[
-        MathFidelity.LoFi,
-        MathFidelity.HiFi2,
-        MathFidelity.HiFi3,
-        MathFidelity.HiFi4,
-    ],
+    math_fidelity=lambda formats: _reduce_math_fidelities(formats),
 )
 def test_reduce(
     formats,
@@ -74,12 +80,6 @@ def test_reduce(
     math_fidelity,
     tile_dimensions,
 ):
-
-    if (formats.input_format in [DataFormat.Float16_b, DataFormat.Float32]) and (
-        math_fidelity == MathFidelity.LoFi
-    ):
-        pytest.skip("LoFi fails in these cases for reduce")
-
     tile_shape = construct_tile_shape(tile_dimensions)
 
     if is_reduce_to_one:

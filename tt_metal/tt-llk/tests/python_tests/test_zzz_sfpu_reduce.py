@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-import pytest
 import torch
 from helpers.format_config import DataFormat, InputOutputFormat
 from helpers.golden_generators import (
@@ -83,6 +82,21 @@ def is_valid_reduce_dimension(mathop, dest_acc, formats, dim):
         return False
 
 
+def get_sfpu_reduce_dest_acc_modes(formats):
+    if formats.input_format.is_32_bit():
+        return [DestAccumulation.Yes]
+    return [DestAccumulation.No, DestAccumulation.Yes]
+
+
+def get_sfpu_reduce_pools():
+    pools = [ReducePool.Min, ReducePool.Max, ReducePool.Sum, ReducePool.Average]
+    if TestConfig.WITH_COVERAGE:
+        return [
+            pool for pool in pools if pool not in (ReducePool.Average, ReducePool.Min)
+        ]
+    return pools
+
+
 @parametrize(
     formats=input_output_formats(
         [
@@ -95,9 +109,9 @@ def is_valid_reduce_dimension(mathop, dest_acc, formats, dim):
         same=True,
     ),
     mathop=lambda reduce_pool: get_supported_reduce_axioms(reduce_pool),
-    dest_acc=[DestAccumulation.No, DestAccumulation.Yes],
+    dest_acc=lambda formats: get_sfpu_reduce_dest_acc_modes(formats),
     input_bounds=lambda formats: get_format_input_bounds(formats),
-    reduce_pool=[ReducePool.Min, ReducePool.Max, ReducePool.Sum, ReducePool.Average],
+    reduce_pool=get_sfpu_reduce_pools(),
     dimension_combinations=lambda mathop, dest_acc, formats: [
         dim
         for dim in dimension_combinations
@@ -112,15 +126,6 @@ def test_sfpu_reduce(
     input_bounds,
     dimension_combinations,
 ):
-
-    if reduce_pool in [ReducePool.Average, ReducePool.Min] and TestConfig.WITH_COVERAGE:
-        pytest.skip(reason="https://github.com/tenstorrent/tt-llk/issues/1040")
-
-    if formats.input_format.is_32_bit() and dest_acc == DestAccumulation.No:
-        pytest.skip(
-            reason="32-bit formats require DestAccumulation.Yes (HW cannot unpack into SrcA/SrcB)"
-        )
-
     min_value, max_value = input_bounds
     input_dimensions = dimension_combinations
     torch_format = format_dict[formats.input_format]
@@ -218,7 +223,7 @@ def test_sfpu_reduce(
         [DataFormat.Float32, DataFormat.Float16_b, DataFormat.Int32],
         same=True,
     ),
-    dest_acc=[DestAccumulation.No, DestAccumulation.Yes],
+    dest_acc=lambda formats: get_sfpu_reduce_dest_acc_modes(formats),
     mathop=[MathOperation.ReduceRow],
     reduce_pool=[ReducePool.Max],
     input_bounds=lambda formats: get_format_input_bounds(formats),
@@ -231,13 +236,6 @@ def test_sfpu_reduce(
 def test_reduce_row_max(
     formats, dest_acc, mathop, reduce_pool, input_bounds, input_dimensions
 ):
-    # Row max SFPU kernel uses SFPLOAD/SFPSTORE with format-specific instruction modes
-    # (e.g. FP16B for Float16_b). When dest_acc=Yes the dest register is 32-bit wide,
-    # so only 32-bit SFPU modes (FP32, INT32) can address it correctly.
-    if formats.input_format.is_32_bit() and dest_acc == DestAccumulation.No:
-        pytest.skip(
-            "32-bit formats require DestAccumulation.Yes (HW cannot unpack into SrcA/SrcB)"
-        )
     min_value, max_value = input_bounds
     torch_format = format_dict[formats.input_format]
 

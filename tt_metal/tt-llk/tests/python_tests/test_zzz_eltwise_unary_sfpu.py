@@ -124,6 +124,39 @@ MATHOPS_INCLUDE_BFP4_B = [
     MathOperation.ReluMin,
 ]
 
+
+def _is_valid_unary_float_param(fmt, approx, mathop, dest_acc):
+    if mathop == MathOperation.ReluMin:
+        return False
+    if mathop == MathOperation.Tanh and approx == ApproximationMode.Yes:
+        return False
+    if (
+        dest_acc == DestAccumulation.No
+        and TestConfig.CHIP_ARCH == ChipArchitecture.BLACKHOLE
+        and (
+            fmt.input_format == DataFormat.Float16
+            or fmt == InputOutputFormat(DataFormat.Float32, DataFormat.Float16)
+        )
+    ):
+        return False
+    if (
+        approx == ApproximationMode.Yes
+        and mathop in [MathOperation.Exp, MathOperation.Exp2, MathOperation.Elu]
+        and (
+            fmt.input_format == DataFormat.Bfp8_b
+            or fmt.output_format == DataFormat.Bfp8_b
+        )
+    ):
+        return False
+    return True
+
+
+def _is_bfp4_b_param(fmt):
+    return (
+        fmt.input_format == DataFormat.Bfp4_b or fmt.input_format_B == DataFormat.Bfp4_b
+    )
+
+
 FLOAT_TEST_PARAMS = list(
     chain(
         (
@@ -147,6 +180,11 @@ FLOAT_TEST_PARAMS = list(
         ),
     )
 )
+FLOAT_TEST_PARAMS = [
+    (fmt, approx, mathop, fast, dest)
+    for fmt, approx, mathop, fast, dest in FLOAT_TEST_PARAMS
+    if _is_valid_unary_float_param(fmt, approx, mathop, dest)
+]
 
 
 # Skipped because of: https://github.com/tenstorrent/tt-llk/issues/1435
@@ -168,63 +206,6 @@ def test_eltwise_unary_sfpu_float(
     dest_acc: DestAccumulation,
     input_dimensions: list[int],
 ):
-    if TestConfig.WITH_COVERAGE and mathop in [
-        MathOperation.Acosh,
-        MathOperation.Log,
-        MathOperation.Log1p,
-        MathOperation.Reciprocal,
-        MathOperation.Sin,
-        MathOperation.Sqrt,
-        MathOperation.Rsqrt,
-        MathOperation.Square,
-        MathOperation.Celu,
-        MathOperation.Silu,
-        MathOperation.Neg,
-        MathOperation.Exp2,
-        MathOperation.Hardsigmoid,
-        MathOperation.Threshold,
-        MathOperation.ReluMax,
-        MathOperation.ReluMin,
-        MathOperation.Tanh,
-    ]:
-        # SFPI Issue link: https://github.com/tenstorrent/tt-metal/issues/33268
-        pytest.skip(
-            reason="When these SFPU ops get compiled with coverage, `#pragma GCC unroll X` marked loops get compiled to invalid assembly"
-        )
-
-    if mathop == MathOperation.ReluMin:
-        pytest.skip(reason="https://github.com/tenstorrent/tt-llk/issues/1120")
-
-    if mathop == MathOperation.Tanh and approx_mode == ApproximationMode.Yes:
-        pytest.skip(reason="Metal tanh does not support approximation mode")
-
-    if TestConfig.WITH_COVERAGE and mathop == MathOperation.Gelu:
-        # Issue link: https://github.com/tenstorrent/tt-llk/issues/883
-        pytest.skip(
-            reason="Compilation error when this mathop gets compiled with coverage"
-        )
-
-    if (
-        dest_acc == DestAccumulation.No
-        and TestConfig.CHIP_ARCH == ChipArchitecture.BLACKHOLE
-    ):
-        if formats.input_format == DataFormat.Float16 or formats == InputOutputFormat(
-            DataFormat.Float32, DataFormat.Float16
-        ):
-            pytest.skip(reason="This combination is not supported on BH architecture")
-
-    if (
-        approx_mode == ApproximationMode.Yes
-        and mathop in [MathOperation.Exp, MathOperation.Exp2, MathOperation.Elu]
-        and (
-            formats.input_format == DataFormat.Bfp8_b
-            or formats.output_format == DataFormat.Bfp8_b
-        )
-    ):
-        pytest.skip(
-            reason="Exp-related operations are not supported for bf8_b format in approximation mode."
-        )
-
     eltwise_unary_sfpu(
         "sources/eltwise_unary_sfpu_test.cpp",
         formats,
@@ -263,6 +244,11 @@ FLOAT_TEST_PARAMS_BFP4_B = list(
         ),
     )
 )
+FLOAT_TEST_PARAMS_BFP4_B = [
+    (fmt, approx, mathop, fast, dest)
+    for fmt, approx, mathop, fast, dest in FLOAT_TEST_PARAMS_BFP4_B
+    if _is_bfp4_b_param(fmt) and _is_valid_unary_float_param(fmt, approx, mathop, dest)
+]
 
 
 # Skipped because of: https://github.com/tenstorrent/tt-llk/issues/1435
@@ -284,57 +270,6 @@ def test_eltwise_unary_sfpu_float_bfp4_b(
     dest_acc: DestAccumulation,
     input_dimensions: list[int],
 ):
-    if TestConfig.WITH_COVERAGE and mathop in [
-        MathOperation.Acosh,
-        MathOperation.Log,
-        MathOperation.Log1p,
-        MathOperation.Reciprocal,
-        MathOperation.Sin,
-        MathOperation.Sqrt,
-        MathOperation.Rsqrt,
-        MathOperation.Square,
-        MathOperation.Celu,
-        MathOperation.Silu,
-        MathOperation.Neg,
-        MathOperation.Exp2,
-        MathOperation.Hardsigmoid,
-        MathOperation.Threshold,
-        MathOperation.ReluMax,
-        MathOperation.ReluMin,
-        MathOperation.Tanh,
-    ]:
-        # SFPI Issue link: https://github.com/tenstorrent/tt-metal/issues/33268
-        pytest.skip(
-            reason="When these SFPU ops get compiled with coverage, `#pragma GCC unroll X` marked loops get compiled to invalid assembly"
-        )
-
-    if (
-        formats.input_format != DataFormat.Bfp4_b
-        and formats.input_format_B != DataFormat.Bfp4_b
-    ):
-        pytest.skip(reason="Not a Bfp4_b test")
-
-    if mathop == MathOperation.ReluMin:
-        pytest.skip(reason="https://github.com/tenstorrent/tt-llk/issues/1120")
-
-    if mathop == MathOperation.Tanh and approx_mode == ApproximationMode.Yes:
-        pytest.skip(reason="Metal tanh does not support approximation mode")
-
-    if TestConfig.WITH_COVERAGE and mathop == MathOperation.Gelu:
-        # Issue link: https://github.com/tenstorrent/tt-llk/issues/883
-        pytest.skip(
-            reason="Compilation error when this mathop gets compiled with coverage"
-        )
-
-    if (
-        dest_acc == DestAccumulation.No
-        and TestConfig.CHIP_ARCH == ChipArchitecture.BLACKHOLE
-    ):
-        if formats.input_format == DataFormat.Float16 or formats == InputOutputFormat(
-            DataFormat.Float32, DataFormat.Float16
-        ):
-            pytest.skip(reason="This combination is not supported on BH architecture")
-
     eltwise_unary_sfpu(
         "sources/eltwise_unary_sfpu_test.cpp",
         formats,

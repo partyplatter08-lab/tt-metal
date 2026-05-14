@@ -19,9 +19,9 @@ from helpers.test_variant_parameters import (
 )
 
 
-@pytest.mark.perf
-@parametrize(
-    formats=input_output_formats(
+def _pack_untilize_perf_formats():
+    """Valid (input, output) pairs for pack-untilize perf; avoids Bfp8_b output and Int32 mixing skips."""
+    all_pairs = input_output_formats(
         [
             DataFormat.Float16_b,
             DataFormat.Float16,
@@ -29,7 +29,20 @@ from helpers.test_variant_parameters import (
             DataFormat.Int32,
             DataFormat.Bfp8_b,
         ]
-    ),
+    )
+    return [
+        f
+        for f in all_pairs
+        if f.output_format != DataFormat.Bfp8_b
+        and not (
+            (f.input_format == DataFormat.Int32) ^ (f.output_format == DataFormat.Int32)
+        )
+    ]
+
+
+@pytest.mark.perf
+@parametrize(
+    formats=_pack_untilize_perf_formats(),
     full_rt_dim=[1, 2, 3, 4, 5, 6, 7, 8],
     full_ct_dim=[1, 2, 3, 4, 5, 6, 7, 8],
 )
@@ -39,14 +52,6 @@ def test_perf_pack_untilize(
     full_rt_dim,
     full_ct_dim,
 ):
-    if formats.output_format == DataFormat.Bfp8_b:
-        pytest.skip("Pack Untilize does not support Bfp8_b output")
-
-    if (formats.input_format == DataFormat.Int32) ^ (
-        formats.output_format == DataFormat.Int32
-    ):
-        pytest.skip("Pack Untilize does not support mixing Int32 with other formats")
-
     max_block_dim = 4 if formats.input_format.is_32_bit() else 8
 
     # fixme: handle format outlier case properly

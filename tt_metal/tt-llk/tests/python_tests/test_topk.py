@@ -25,9 +25,7 @@ Validation:
 
 import sys
 
-import pytest
 import torch
-from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.format_config import DataFormat, InputOutputFormat
 from helpers.golden_generators import (
     ELEMENTS_PER_TILE,
@@ -52,6 +50,18 @@ from helpers.test_variant_parameters import (
 from helpers.utils import _RECORD_TEST_ORDER, passed_test
 
 NUM_STAGES = 2  # Values and Indices stage
+
+
+def _topk_input_dimensions():
+    dimensions = [
+        [32, 128],
+        [64, 128],
+        [256, 128],
+        [32, 1024],
+    ]
+    if TestConfig.CHIP_ARCH.name == "BLACKHOLE":
+        return [dim for dim in dimensions if dim != [32, 1024]]
+    return dimensions
 
 
 def transform_result_tensor_to_right_form(
@@ -272,15 +282,11 @@ def get_value_tiles_from_topk_tensor(
             DataFormat.Float16_b,
         ]
     ),
-    input_dimensions=[
-        [32, 128],
-        [64, 128],
-        [256, 128],
-        [32, 1024],
-    ],
+    input_dimensions=_topk_input_dimensions(),
     K=[32],  # TODO: Add more K values (like 16, 64).
     sort_direction=[TopKSortDirection.Descending, TopKSortDirection.Ascending],
-    stable_sort=[False, True],
+    # TODO: Check tenstorrent/tt-metal#33492 and enable once stable sort is fixed.
+    stable_sort=[False],
 )
 def test_topk_sfpu(
     formats: InputOutputFormat,
@@ -289,21 +295,6 @@ def test_topk_sfpu(
     sort_direction: TopKSortDirection,
     stable_sort: bool,
 ):
-
-    if (
-        input_dimensions == [32, 1024]
-        and get_chip_architecture() == ChipArchitecture.BLACKHOLE
-    ):
-        # For 32x1024 input on blackhole arch, we have observed some discrepancies in the topk values between hardware and golden.
-        # TODO: Fix issue #1344 on tt-llk.
-        pytest.skip(
-            "Skipping test for 32x1024 input on blackhole arch due to observed discrepancies."
-        )
-
-    if stable_sort:
-        pytest.skip(
-            "Stable sort is currently not broken in LLK API."
-        )  # TODO: Check tenstorrent/tt-metal#33492 and remove this once fixed.
 
     sfpu_false_spec = StimuliSpec.uniform(low=0.0, high=1.0)
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(

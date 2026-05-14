@@ -91,6 +91,17 @@ all_params = [
         MathFidelity.HiFi4,
     ]
 ]
+all_params = [
+    p
+    for p in all_params
+    if not (
+        p["mathop"] in [MathOperation.Elwadd, MathOperation.Elwsub]
+        and p["math_fidelity"] != MathFidelity.LoFi
+    )
+    and not (
+        p["mathop"] == MathOperation.Elwmul and p["unary_op"] == MathOperation.Square
+    )
+]
 
 # Generate parameter IDs manually
 param_ids = [
@@ -116,22 +127,6 @@ def test_sweep_test(config):
     approx_mode = config["approx_mode"]
     dst_sync = config["dst_sync"]
     math_fidelity = config["math_fidelity"]
-
-    # ------------------------------------------------------------------
-    # Skip known failing cases
-    # ------------------------------------------------------------------
-
-    if (
-        binary_op in [MathOperation.Elwadd, MathOperation.Elwsub]
-        and math_fidelity != MathFidelity.LoFi
-    ):
-        pytest.skip("No need to test higher fidelities for add/sub")
-
-    # Temporary: skip precision-sensitive fused case we have not modelled yet
-    if binary_op == MathOperation.Elwmul and unary_op == MathOperation.Square:
-        pytest.skip(
-            "Known precision edge-case for Elwadd+Square with dest_acc; skipped for now"
-        )
 
     # ------------------------------------------------------------------
     # Generate input stimuli

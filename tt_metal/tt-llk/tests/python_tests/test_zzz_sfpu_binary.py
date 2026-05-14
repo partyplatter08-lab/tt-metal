@@ -4,7 +4,6 @@
 from dataclasses import dataclass
 from enum import Enum
 
-import pytest
 import torch
 from helpers.chip_architecture import ChipArchitecture
 from helpers.format_config import DataFormat
@@ -25,6 +24,49 @@ from helpers.tilize_untilize import tilize
 from helpers.utils import passed_test
 
 
+def get_sfpu_binary_float_mathops():
+    mathops = [
+        MathOperation.SfpuElwadd,
+        MathOperation.SfpuElwsub,
+        MathOperation.SfpuElwmul,
+    ]
+    if TestConfig.CHIP_ARCH == ChipArchitecture.WORMHOLE:
+        return [m for m in mathops if m != MathOperation.SfpuElwsub]
+    return mathops
+
+
+def get_sfpu_binary_float_dest_acc_modes(formats, mathop):
+    if (
+        TestConfig.CHIP_ARCH == ChipArchitecture.WORMHOLE
+        and mathop in [MathOperation.SfpuElwadd, MathOperation.SfpuElwmul]
+        and formats.input_format == DataFormat.Float32
+    ):
+        return [DestAccumulation.Yes]
+    if (
+        TestConfig.CHIP_ARCH == ChipArchitecture.BLACKHOLE
+        and formats.input_format == DataFormat.Float16
+    ):
+        return [DestAccumulation.Yes]
+    return [DestAccumulation.No, DestAccumulation.Yes]
+
+
+def get_sfpu_add_top_row_dest_acc_modes(formats):
+    if formats.input_format.is_32_bit():
+        return [DestAccumulation.Yes]
+    return [DestAccumulation.No, DestAccumulation.Yes]
+
+
+def get_sfpu_binary_bcast_dest_acc_modes(formats):
+    if formats.input_format == DataFormat.Float32:
+        return [DestAccumulation.Yes]
+    if (
+        TestConfig.CHIP_ARCH == ChipArchitecture.BLACKHOLE
+        and formats.input_format == DataFormat.Float16
+    ):
+        return [DestAccumulation.Yes]
+    return [DestAccumulation.No, DestAccumulation.Yes]
+
+
 @parametrize(
     formats=input_output_formats(
         [
@@ -34,41 +76,16 @@ from helpers.utils import passed_test
             DataFormat.Bfp8_b,
         ]
     ),
-    mathop=[
-        MathOperation.SfpuElwadd,
-        MathOperation.SfpuElwsub,
-        MathOperation.SfpuElwmul,
-    ],
-    dest_acc=[DestAccumulation.No, DestAccumulation.Yes],
+    mathop=get_sfpu_binary_float_mathops(),
+    dest_acc=lambda formats, mathop: get_sfpu_binary_float_dest_acc_modes(
+        formats, mathop
+    ),
 )
 def test_sfpu_binary_float(
     formats,
     dest_acc,
     mathop,
 ):
-    if (
-        TestConfig.CHIP_ARCH == ChipArchitecture.WORMHOLE
-        and mathop == MathOperation.SfpuElwsub
-    ):
-        pytest.skip("Not currently supported in tests")
-
-    if (
-        TestConfig.CHIP_ARCH == ChipArchitecture.WORMHOLE
-        and mathop in [MathOperation.SfpuElwadd, MathOperation.SfpuElwmul]
-        and dest_acc == DestAccumulation.No
-        and formats.input_format == DataFormat.Float32
-    ):
-        pytest.skip(reason="https://github.com/tenstorrent/tt-llk/issues/1092")
-
-    if (
-        TestConfig.CHIP_ARCH == ChipArchitecture.BLACKHOLE
-        and formats.input_format == DataFormat.Float16
-        and dest_acc == DestAccumulation.No
-    ):
-        pytest.skip(
-            "Float16_a isn't supported for SFPU on Blackhole without being converted to 32-bit intermediate format in dest register"
-        )
-
     sfpu_binary(
         formats,
         dest_acc,
@@ -111,14 +128,9 @@ def test_sfpu_binary_int(
         same=True,
     ),
     mathop=[MathOperation.SfpuAddTopRow],
-    dest_acc=[DestAccumulation.No, DestAccumulation.Yes],
+    dest_acc=lambda formats: get_sfpu_add_top_row_dest_acc_modes(formats),
 )
 def test_sfpu_binary_add_top_row(formats, dest_acc, mathop):
-    if formats.input_format.is_32_bit() and dest_acc == DestAccumulation.No:
-        pytest.skip(
-            "32-bit integer formats require DestAccumulation.Yes (HW cannot unpack into SrcA/SrcB)"
-        )
-
     input_dimensions = [64, 32]
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,
@@ -349,7 +361,7 @@ def _golden_sfpu_binary_bcast(
         MathOperation.SfpuElwsub,
         MathOperation.SfpuElwmul,
     ],
-    dest_acc=[DestAccumulation.No, DestAccumulation.Yes],
+    dest_acc=lambda formats: get_sfpu_binary_bcast_dest_acc_modes(formats),
 )
 def test_sfpu_binary_bcast(
     formats,
@@ -357,18 +369,6 @@ def test_sfpu_binary_bcast(
     mathop,
     dest_acc,
 ):
-    if dest_acc == DestAccumulation.No and formats.input_format == DataFormat.Float32:
-        pytest.skip(reason="Float32 inputs with dest_acc=No are not supported")
-
-    if (
-        TestConfig.CHIP_ARCH == ChipArchitecture.BLACKHOLE
-        and formats.input_format == DataFormat.Float16
-        and dest_acc == DestAccumulation.No
-    ):
-        pytest.skip(
-            "Float16_a isn't supported for SFPU on Blackhole without being converted to 32-bit intermediate format in dest register"
-        )
-
     # Mirror sfpu_binary(): on Blackhole, Float16/Float32 inputs require
     # dest_acc=Yes (32-bit dest), so silently upgrade the parametrized value.
     if (

@@ -4,7 +4,7 @@
 import pytest
 from helpers.format_config import DataFormat
 from helpers.llk_params import PerfRunType, Transpose
-from helpers.param_config import input_output_formats, parametrize
+from helpers.param_config import input_output_formats
 from helpers.perf import PerfConfig
 from helpers.stimuli_config import StimuliConfig
 from helpers.test_variant_parameters import (
@@ -14,13 +14,33 @@ from helpers.test_variant_parameters import (
 )
 
 
+def _perf_unpack_transpose_matrix():
+    """
+    Valid (formats, unpack_transpose_faces, unpack_transpose_within_face) tuples.
+
+    Int32 is omitted: identity-only transpose with both unpack flags No was always skipped.
+    Bfp8_b/Float16 pairs avoid Int32 output and unsupported transpose-on-Int32 cases from the old sweep.
+    """
+    fmts = input_output_formats([DataFormat.Bfp8_b, DataFormat.Float16])
+    transpose_modes = [
+        (Transpose.No, Transpose.Yes),
+        (Transpose.Yes, Transpose.No),
+        (Transpose.Yes, Transpose.Yes),
+    ]
+    return [(f, uf, uw) for f in fmts for uf, uw in transpose_modes]
+
+
+_PERF_UNPACK_TRANSPOSE_CASES = _perf_unpack_transpose_matrix()
+
+
 @pytest.mark.perf
-@parametrize(
-    formats=input_output_formats(
-        [DataFormat.Bfp8_b, DataFormat.Float16, DataFormat.Int32],
-    ),
-    unpack_transpose_faces=[Transpose.No, Transpose.Yes],
-    unpack_transpose_within_face=[Transpose.No, Transpose.Yes],
+@pytest.mark.parametrize(
+    "formats,unpack_transpose_faces,unpack_transpose_within_face",
+    _PERF_UNPACK_TRANSPOSE_CASES,
+    ids=[
+        f"fmt:{f}-uf:{uf.name}-uw:{uw.name}"
+        for f, uf, uw in _PERF_UNPACK_TRANSPOSE_CASES
+    ],
 )
 def test_perf_unpack_transpose(
     perf_report,
@@ -28,37 +48,6 @@ def test_perf_unpack_transpose(
     unpack_transpose_faces,
     unpack_transpose_within_face,
 ):
-    # Int32 format restrictions
-    if formats.input_format == DataFormat.Int32:
-        # Unpacker: Int32 can ONLY unpack to Int32 (identity) in Dst register per ISA specification
-        if formats.output_format != DataFormat.Int32:
-            pytest.skip(
-                f"Int32 -> {formats.output_format.name} conversion not supported (unpacker limitation)"
-            )
-        # Transpose: Int32 does not support any transposition operations
-        if (
-            unpack_transpose_faces == Transpose.Yes
-            or unpack_transpose_within_face == Transpose.Yes
-        ):
-            pytest.skip("Transpose not supported for Int32")
-
-    # Packer: Bfp8_b and Float16 cannot convert to Int32 in this test matrix.
-    if formats.output_format == DataFormat.Int32 and formats.input_format in [
-        DataFormat.Bfp8_b,
-        DataFormat.Float16,
-    ]:
-        pytest.skip(
-            f"{formats.input_format.name} -> Int32 conversion not supported (packer limitation)"
-        )
-
-    if (
-        unpack_transpose_faces == Transpose.No
-        and unpack_transpose_within_face == Transpose.No
-    ):
-        pytest.skip(
-            "Skipping test for unpack_transpose_faces=False and unpack_transpose_within_face=False"
-        )
-
     tile_count = 16
 
     configuration = PerfConfig(

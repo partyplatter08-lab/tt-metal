@@ -32,13 +32,10 @@ from helpers.test_variant_parameters import (
 @parametrize(
     formats=input_output_formats([DataFormat.Float16_b, DataFormat.Float32]),
     rt_dim=[1],
-    ct_dim=[1, 2, 3, 4, 5, 6, 7, 8],
+    # ct_dim 1 uses standard tilize fallback — not representative of fast path
+    ct_dim=[2, 3, 4, 5, 6, 7, 8],
 )
 def test_perf_fast_tilize(perf_report, formats, rt_dim, ct_dim):
-    # Width 1 uses standard tilize fallback — not representative of fast path
-    if ct_dim < 2:
-        pytest.skip("ct_dim < 2 uses standard tilize fallback")
-
     _run_fast_tilize_perf(perf_report, formats, rt_dim, ct_dim)
 
 

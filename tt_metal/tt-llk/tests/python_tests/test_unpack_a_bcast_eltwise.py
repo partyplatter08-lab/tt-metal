@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-import pytest
 import torch
 from conftest import skip_for_blackhole
 from helpers.format_config import DataFormat
@@ -27,6 +26,11 @@ from helpers.tilize_untilize import tilize
 from helpers.utils import passed_test
 
 
+def _valid_srca_reuse_counts(input_dimensions):
+    input_tiles = input_dimensions[0] * input_dimensions[1] // 1024
+    return [reuse for reuse in [2, 4, 8] if input_tiles % reuse == 0]
+
+
 @skip_for_blackhole
 @parametrize(
     formats=input_output_formats(
@@ -36,7 +40,9 @@ from helpers.utils import passed_test
     ),
     mathop=[MathOperation.Elwsub, MathOperation.Elwadd, MathOperation.Elwmul],
     dest_acc=[DestAccumulation.No],
-    srca_reuse_count=[2, 4, 8],
+    srca_reuse_count=lambda input_dimensions: _valid_srca_reuse_counts(
+        input_dimensions
+    ),
     math_fidelity=[
         MathFidelity.LoFi,
     ],
@@ -58,12 +64,6 @@ def test_unp_bcast_sub_sdpa(
     # Precompute constants
     input_tiles = input_dimensions[0] * input_dimensions[1] // 1024
     reuse_factor = input_tiles // srca_reuse_count
-
-    if input_tiles % srca_reuse_count != 0:
-        pytest.skip("Input tiles must be divisible by reuse factor")
-
-    if mathop != MathOperation.Elwmul and math_fidelity != MathFidelity.LoFi:
-        pytest.skip("Fidelity does not affect Elwadd and Elwsub operations")
 
     src_A, tile_cnt_A, src_B, _ = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,

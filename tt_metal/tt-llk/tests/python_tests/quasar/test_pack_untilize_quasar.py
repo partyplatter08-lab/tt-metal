@@ -87,15 +87,19 @@ def generate_pack_untilize_combinations(
     return combinations
 
 
-PACK_UNTILIZE_FORMATS = input_output_formats(
-    [
-        DataFormat.Float16,
-        DataFormat.Float16_b,
-        DataFormat.Int16,
-        DataFormat.Int32,
-        DataFormat.MxFp4,
-    ],
-)
+PACK_UNTILIZE_FORMATS = [
+    f
+    for f in input_output_formats(
+        [
+            DataFormat.Float16,
+            DataFormat.Float16_b,
+            DataFormat.Int16,
+            DataFormat.Int32,
+            DataFormat.MxFp4,
+        ],
+    )
+    if not f.output_format.is_mx_format()
+]
 ALL_PACK_UNTILIZE_COMBINATIONS = generate_pack_untilize_combinations(
     PACK_UNTILIZE_FORMATS
 )
@@ -107,11 +111,8 @@ ALL_PACK_UNTILIZE_COMBINATIONS = generate_pack_untilize_combinations(
 )
 def test_pack_untilize_quasar(formats_dest_acc_sync_dimensions):
     (formats, dest_acc, dest_sync_mode, input_dimensions) = (
-        formats_dest_acc_sync_dimensions[0]
+        formats_dest_acc_sync_dimensions
     )
-
-    if formats.output_format.is_mx_format():
-        pytest.skip("MX as output format produces flaky results.")
 
     src_A, tile_cnt_A, src_B, _ = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,

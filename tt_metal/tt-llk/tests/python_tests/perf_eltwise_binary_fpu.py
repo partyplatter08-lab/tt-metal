@@ -8,7 +8,6 @@ from helpers.constraints import (
 )
 from helpers.format_config import DataFormat
 from helpers.llk_params import (
-    MathFidelity,
     MathOperation,
     PerfRunType,
 )
@@ -42,9 +41,6 @@ def test_perf_eltwise_binary_fpu(
     math_fidelity,
     dest_acc,
 ):
-    if mathop != MathOperation.Elwmul and math_fidelity != MathFidelity.LoFi:
-        pytest.skip("Fidelity does not affect Elwadd and Elwsub operations")
-
     configuration = PerfConfig(
         "sources/eltwise_binary_fpu_perf.cpp",
         formats,

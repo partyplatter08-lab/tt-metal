@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-import pytest
 import torch
 from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.constraints import (
@@ -22,6 +21,7 @@ from helpers.llk_params import (
     format_dict,
 )
 from helpers.param_config import (
+    exclude_fp8_e4m3_on_wormhole,
     get_num_blocks_and_num_tiles_in_block,
     input_output_formats,
     parametrize,
@@ -82,14 +82,16 @@ def get_valid_num_faces_datacopy(tilize):
 
 
 @parametrize(
-    formats=input_output_formats(
-        [
-            DataFormat.Float32,
-            DataFormat.Float16,
-            DataFormat.Float16_b,
-            DataFormat.Bfp8_b,
-            DataFormat.Fp8_e4m3,
-        ]
+    formats=exclude_fp8_e4m3_on_wormhole(
+        input_output_formats(
+            [
+                DataFormat.Float32,
+                DataFormat.Float16,
+                DataFormat.Float16_b,
+                DataFormat.Bfp8_b,
+                DataFormat.Fp8_e4m3,
+            ]
+        )
     ),
     dest_acc=lambda formats: get_valid_dest_accumulation_modes(formats),
     num_faces=lambda tilize: get_valid_num_faces_datacopy(tilize),
@@ -103,13 +105,6 @@ def test_unary_datacopy(
     tilize,
     input_dimensions,
 ):
-
-    # skip if Fp8_e4m3 for wormhole
-    if get_chip_architecture() == ChipArchitecture.WORMHOLE and (
-        formats.input_format == DataFormat.Fp8_e4m3
-        or formats.output_format == DataFormat.Fp8_e4m3
-    ):
-        pytest.skip("Fp8_e4m3 not supported on wormhole")
 
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,
@@ -212,13 +207,6 @@ def test_unary_datacopy_bfp4_b(
     tilize,
     input_dimensions,
 ):
-
-    # skip if Fp8_e4m3 for wormhole
-    if get_chip_architecture() == ChipArchitecture.WORMHOLE and (
-        formats.input_format == DataFormat.Fp8_e4m3
-        or formats.output_format == DataFormat.Fp8_e4m3
-    ):
-        pytest.skip("Fp8_e4m3 not supported on wormhole")
 
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,

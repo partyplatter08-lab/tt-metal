@@ -48,10 +48,6 @@ def test_perf_col_tile_sdpa(
     srca_reuse_count,
 ):
 
-    # MathFidelity is only used for Elwmul
-    if mathop != MathOperation.Elwmul and math_fidelity != MathFidelity.LoFi:
-        pytest.skip("Fidelity does not affect Elwadd and Elwsub operations")
-
     tile_count = input_dimensions[0] * input_dimensions[1] // 1024
 
     configuration = PerfConfig(

@@ -343,6 +343,22 @@ def input_output_formats(
     return [InputOutputFormat(input, output) for input in formats for output in formats]
 
 
+def exclude_fp8_e4m3_on_wormhole(
+    formats: List[InputOutputFormat],
+) -> List[InputOutputFormat]:
+    """Remove I/O pairs that use Fp8_e4m3 on Wormhole (unsupported in these LLK tests)."""
+    from .chip_architecture import ChipArchitecture, get_chip_architecture
+
+    if get_chip_architecture() != ChipArchitecture.WORMHOLE:
+        return list(formats)
+    return [
+        f
+        for f in formats
+        if f.input_format != DataFormat.Fp8_e4m3
+        and f.output_format != DataFormat.Fp8_e4m3
+    ]
+
+
 def generate_combination(formats: List[Tuple[DataFormat]]) -> List[FormatConfig]:
     """
     A function that creates a list of FormatConfig objects from a list of DataFormat objects that client wants to test.

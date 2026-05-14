@@ -49,6 +49,7 @@ def matmul_combos(
         (format, accumulation, dims)
         for format in formats
         for accumulation in dest_acc
+        if not (is_dest_acc_needed(format) and accumulation == DestAccumulation.No)
         for dims in dimensions[_dest_bank_max_tiles(format, accumulation)]
     ]
 
@@ -80,9 +81,6 @@ def test_perf_matmul(
 ):
 
     formats, dest_acc, (matrix_a, matrix_b) = combos
-
-    if is_dest_acc_needed(formats) and dest_acc == DestAccumulation.No:
-        pytest.skip("Dest accumulation must be enabled for this format")
 
     run_types = [
         PerfRunType.L1_TO_L1,

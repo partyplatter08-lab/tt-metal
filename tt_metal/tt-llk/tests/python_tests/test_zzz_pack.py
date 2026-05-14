@@ -11,7 +11,6 @@ Tests the LLK pack kernel with:
 """
 
 
-import pytest
 import torch
 from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.constraints import (
@@ -127,27 +126,83 @@ def is_relu_threshold_tolerance_issue(
     return acceptable.all().item()
 
 
-@parametrize(
-    formats=input_output_formats(
-        [
-            DataFormat.Float16_b,
-            DataFormat.Float16,
-            DataFormat.Float32,
-            DataFormat.Int32,
-            DataFormat.Bfp8_b,
-        ]
-    ),
-    dest_acc=lambda formats: get_valid_dest_accumulation_modes(formats),
-    input_dimensions=[[32, 32], [64, 64], [32, 64], [64, 32]],
-    relu_type=[
+def _pack_formats():
+    return [
+        f
+        for f in input_output_formats(
+            [
+                DataFormat.Float16_b,
+                DataFormat.Float16,
+                DataFormat.Float32,
+                DataFormat.Int32,
+                DataFormat.Bfp8_b,
+            ]
+        )
+        if not (
+            (f.input_format == DataFormat.Int32) ^ (f.output_format == DataFormat.Int32)
+        )
+    ]
+
+
+def _pack_relu_types(formats, dest_acc):
+    unpack_to_dest = (
+        formats.input_format.is_32_bit() and dest_acc == DestAccumulation.Yes
+    )
+    data_formats = infer_data_formats(
+        input_format=formats.input_format,
+        output_format=formats.output_format,
+        is_fp32_dest_acc_en=dest_acc,
+        unpacking_to_dest=unpack_to_dest,
+    )
+    if (
+        dest_acc == DestAccumulation.Yes
+        and get_chip_architecture() == ChipArchitecture.BLACKHOLE
+        and not formats.input_format.is_integer()
+    ):
+        data_formats.pack_src = DataFormat.Float32
+    if data_formats.pack_src.is_integer():
+        return [PackerReluType.NoRelu, PackerReluType.ZeroRelu]
+    return [
         PackerReluType.NoRelu,
         PackerReluType.ZeroRelu,
         PackerReluType.MinThresholdRelu,
         PackerReluType.MaxThresholdRelu,
-    ],
-    dest_sync=[DestSync.Half, DestSync.Full],
-    dest_index=lambda dest_acc, dest_sync, formats, input_dimensions: get_valid_dest_indices(
+    ]
+
+
+def _pack_dest_indices(dest_acc, dest_sync, formats, input_dimensions):
+    tile_cnt = (
+        input_dimensions[0]
+        * input_dimensions[1]
+        // (TILE_DIMENSIONS[0] * TILE_DIMENSIONS[1])
+    )
+    valid_indices = []
+    for dest_index in get_valid_dest_indices(
         dest_sync, dest_acc, formats, input_dimensions
+    ):
+        _, num_tiles_in_block = get_num_blocks_and_num_tiles_in_block(
+            dest_sync,
+            dest_acc,
+            formats,
+            input_dimensions,
+            TILE_DIMENSIONS,
+            BlocksCalculationAlgorithm.Standard,
+        )
+        if dest_index != 0:
+            num_tiles_in_block -= dest_index
+        if num_tiles_in_block > 0 and tile_cnt % num_tiles_in_block == 0:
+            valid_indices.append(dest_index)
+    return valid_indices
+
+
+@parametrize(
+    formats=_pack_formats(),
+    dest_acc=lambda formats: get_valid_dest_accumulation_modes(formats),
+    input_dimensions=[[32, 32], [64, 64], [32, 64], [64, 32]],
+    relu_type=lambda formats, dest_acc: _pack_relu_types(formats, dest_acc),
+    dest_sync=[DestSync.Half, DestSync.Full],
+    dest_index=lambda dest_acc, dest_sync, formats, input_dimensions: _pack_dest_indices(
+        dest_acc, dest_sync, formats, input_dimensions
     ),
 )
 def test_pack(
@@ -158,14 +213,6 @@ def test_pack(
     dest_sync,
     dest_index,
 ):
-
-    if (formats.input_format == DataFormat.Int32) ^ (
-        formats.output_format == DataFormat.Int32
-    ):
-        pytest.skip(
-            "Pack does not support mixing Int32 with other formats. Check format conversions in packer for more information."
-        )
-
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,
         input_dimensions_A=input_dimensions,
@@ -202,15 +249,6 @@ def test_pack(
     ):
         data_formats.pack_src = DataFormat.Float32
 
-    if data_formats.pack_src.is_integer() and relu_type in [
-        PackerReluType.MinThresholdRelu,
-        PackerReluType.MaxThresholdRelu,
-    ]:
-        pytest.skip(
-            "Pack source format cannot be an integer format with ReLu Type: "
-            + str(relu_type)
-        )
-
     tensor_average = (
         torch.mean(golden_tensor).item()
         if not formats.output_format.is_integer()
@@ -241,10 +279,6 @@ def test_pack(
 
     if dest_index != 0:
         num_tiles_in_block = num_tiles_in_block - dest_index
-        if num_tiles_in_block <= 0 or tile_cnt_A % num_tiles_in_block != 0:
-            pytest.skip(
-                f"Dest index {dest_index} is not valid for tile count {tile_cnt_A} and num_tiles_in_block {num_tiles_in_block}."
-            )
         num_blocks = tile_cnt_A // num_tiles_in_block
 
     configuration = TestConfig(

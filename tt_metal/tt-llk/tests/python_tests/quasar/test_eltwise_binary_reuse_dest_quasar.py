@@ -58,9 +58,8 @@ OUTPUT_DIMENSIONS = [
 TILE_DIMENSIONS = [32, 32]
 
 
-@pytest.mark.quasar
-@parametrize(
-    formats=input_output_formats(
+def _reuse_dest_quasar_formats(mathop):
+    fmts = input_output_formats(
         [
             DataFormat.Float16_b,
             DataFormat.Float16,
@@ -68,25 +67,81 @@ TILE_DIMENSIONS = [32, 32]
             DataFormat.MxFp8P,
             DataFormat.MxFp4,
         ],
-    ),
+    )
+    if mathop in (MathOperation.Elwadd, MathOperation.Elwsub):
+        return fmts
+    return [
+        f
+        for f in fmts
+        if f.input_format not in (DataFormat.MxFp8R, DataFormat.MxFp8P)
+        and f.output_format != DataFormat.MxFp4
+    ]
+
+
+def _reuse_dest_quasar_math_fidelity(mathop):
+    if mathop in (MathOperation.Elwadd, MathOperation.Elwsub):
+        return [MathFidelity.LoFi]
+    return [
+        MathFidelity.LoFi,
+        MathFidelity.HiFi2,
+        MathFidelity.HiFi3,
+        MathFidelity.HiFi4,
+    ]
+
+
+def _reuse_dest_quasar_output_dimensions(input_dimensions):
+    input_tile_cnt = (input_dimensions[0] // TILE_DIMENSIONS[0]) * (
+        input_dimensions[1] // TILE_DIMENSIONS[1]
+    )
+    valid_dimensions = []
+    for output_dimensions in OUTPUT_DIMENSIONS:
+        output_tile_cnt = (output_dimensions[0] // TILE_DIMENSIONS[0]) * (
+            output_dimensions[1] // TILE_DIMENSIONS[1]
+        )
+        if (
+            input_tile_cnt % output_tile_cnt == 0
+            and input_tile_cnt // output_tile_cnt > 1
+        ):
+            valid_dimensions.append(output_dimensions)
+    return valid_dimensions
+
+
+def _reuse_dest_quasar_dest_sync_modes(formats, output_dimensions):
+    valid_modes = []
+    for dest_sync_mode in [DestSync.Half, DestSync.Full]:
+        output_num_blocks, _ = get_num_blocks_and_num_tiles_in_block(
+            dest_sync_mode,
+            DestAccumulation.No,
+            formats,
+            output_dimensions,
+            tuple(TILE_DIMENSIONS),
+            BlocksCalculationAlgorithm.Standard,
+        )
+        if output_num_blocks <= 1:
+            valid_modes.append(dest_sync_mode)
+    return valid_modes
+
+
+@pytest.mark.quasar
+@parametrize(
     mathop=[
         MathOperation.Elwadd,
         MathOperation.Elwsub,
         MathOperation.Elwmul,
     ],
+    formats=lambda mathop: _reuse_dest_quasar_formats(mathop),
     reuse_dest_type=[
         EltwiseBinaryReuseDestType.DEST_TO_SRCA,
         EltwiseBinaryReuseDestType.DEST_TO_SRCB,
     ],
-    math_fidelity=[
-        MathFidelity.LoFi,
-        MathFidelity.HiFi2,
-        MathFidelity.HiFi3,
-        MathFidelity.HiFi4,
-    ],
-    dest_sync_mode=[DestSync.Half, DestSync.Full],
+    math_fidelity=lambda mathop: _reuse_dest_quasar_math_fidelity(mathop),
     input_dimensions=INPUT_DIMENSIONS,
-    output_dimensions=OUTPUT_DIMENSIONS,
+    output_dimensions=lambda input_dimensions: _reuse_dest_quasar_output_dimensions(
+        input_dimensions
+    ),
+    dest_sync_mode=lambda formats, output_dimensions: _reuse_dest_quasar_dest_sync_modes(
+        formats, output_dimensions
+    ),
 )
 def test_eltwise_binary_reuse_dest_quasar(
     formats,
@@ -98,22 +153,6 @@ def test_eltwise_binary_reuse_dest_quasar(
     output_dimensions,
     boot_mode=BootMode.DEFAULT,
 ):
-    if mathop != MathOperation.Elwmul and math_fidelity != MathFidelity.LoFi:
-        pytest.skip("elwadd/elwsub only supports LoFi mode")
-
-    if mathop == MathOperation.Elwmul and (
-        formats.input_format == DataFormat.MxFp8R
-        or formats.input_format == DataFormat.MxFp8P
-    ):
-        pytest.skip(
-            "Elwmul with MxFp8R or MxFp8P input and reuse_dest has rounding differences; skip to avoid flaky tolerance failures"
-        )
-
-    if mathop == MathOperation.Elwmul and formats.output_format == DataFormat.MxFp4:
-        pytest.skip(
-            "Elwmul with MxFp4 output and reuse_dest has rounding differences; skip to avoid flaky tolerance failures"
-        )
-
     # MX formats require implied_math_format=Yes on Quasar; set it and disable_format_inference so golden matches.
     use_mx = formats.input_format.is_mx_format() or formats.output_format.is_mx_format()
     implied_math_format = ImpliedMathFormat.Yes if use_mx else ImpliedMathFormat.No
@@ -132,14 +171,7 @@ def test_eltwise_binary_reuse_dest_quasar(
         output_dimensions[1] // tile_cols
     )
 
-    if tile_cnt_input % tile_cnt_output != 0:
-        pytest.skip(
-            f"Input tile count ({tile_cnt_input}) must be divisible by "
-            f"output tile count ({tile_cnt_output})"
-        )
     inner_dim = tile_cnt_input // tile_cnt_output
-    if inner_dim == 1:
-        pytest.skip("reuse_dest requires inner_dim > 1")
 
     tile_dimensions_tuple = (tile_rows, tile_cols)
     output_num_blocks, output_tiles_in_block = get_num_blocks_and_num_tiles_in_block(
@@ -150,11 +182,6 @@ def test_eltwise_binary_reuse_dest_quasar(
         tile_dimensions_tuple,
         BlocksCalculationAlgorithm.Standard,
     )
-    if output_num_blocks > 1:
-        pytest.skip(
-            "Quasar reuse_dest kernel supports single output block only; "
-            "multi-block uses block-relative indexing and wrong accumulation"
-        )
     input_tiles_in_block = inner_dim * output_tiles_in_block
     input_num_blocks = output_num_blocks
 

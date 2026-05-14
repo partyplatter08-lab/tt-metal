@@ -51,8 +51,42 @@ def get_num_tiles_per_accumulation(acc_to_dest: bool) -> int:
     return 2 if acc_to_dest else 1
 
 
+def _eltwise_binary_quasar_math_fidelity(mathop):
+    if mathop in (MathOperation.Elwadd, MathOperation.Elwsub):
+        return [MathFidelity.LoFi]
+    return [
+        MathFidelity.LoFi,
+        MathFidelity.HiFi2,
+        MathFidelity.HiFi3,
+        MathFidelity.HiFi4,
+    ]
+
+
+def _eltwise_binary_quasar_implied_math_format(formats):
+    if formats.input_format.is_mx_format():
+        return [ImpliedMathFormat.Yes]
+    return [ImpliedMathFormat.No, ImpliedMathFormat.Yes]
+
+
+def _eltwise_binary_quasar_acc_to_dest(dest_sync_dims_dest_acc):
+    _, input_dimensions, _ = dest_sync_dims_dest_acc
+    tile_shape = construct_tile_shape()
+    total_tiles = (
+        input_dimensions[0] * input_dimensions[1]
+    ) // tile_shape.total_tile_size()
+    modes = [False]
+    if total_tiles >= get_num_tiles_per_accumulation(True) and total_tiles % 2 == 0:
+        modes.append(True)
+    return modes
+
+
 @pytest.mark.quasar
 @parametrize(
+    mathop=[
+        MathOperation.Elwadd,
+        MathOperation.Elwsub,
+        MathOperation.Elwmul,
+    ],
     formats=input_output_formats(
         [
             DataFormat.MxFp8R,
@@ -62,23 +96,14 @@ def get_num_tiles_per_accumulation(acc_to_dest: bool) -> int:
             DataFormat.Float16,
         ],
     ),
-    mathop=[
-        MathOperation.Elwadd,
-        MathOperation.Elwsub,
-        MathOperation.Elwmul,
-    ],
-    math_fidelity=[
-        MathFidelity.LoFi,
-        MathFidelity.HiFi2,
-        MathFidelity.HiFi3,
-        MathFidelity.HiFi4,
-    ],
-    implied_math_format=[
-        ImpliedMathFormat.No,
-        ImpliedMathFormat.Yes,
-    ],
+    math_fidelity=lambda mathop: _eltwise_binary_quasar_math_fidelity(mathop),
+    implied_math_format=lambda formats: _eltwise_binary_quasar_implied_math_format(
+        formats
+    ),
     dest_sync_dims_dest_acc=ELTWISE_DIMENSIONS,
-    acc_to_dest=[False, True],
+    acc_to_dest=lambda dest_sync_dims_dest_acc: _eltwise_binary_quasar_acc_to_dest(
+        dest_sync_dims_dest_acc
+    ),
     num_faces=[4],
 )
 def test_eltwise_binary(
@@ -94,29 +119,10 @@ def test_eltwise_binary(
     dest_sync_mode, input_dimensions, dest_acc = dest_sync_dims_dest_acc
     tile_shape = construct_tile_shape()
 
-    # Math fidelity only affects multiplication operations
-    if (
-        mathop in [MathOperation.Elwadd, MathOperation.Elwsub]
-        and math_fidelity != MathFidelity.LoFi
-    ):
-        pytest.skip("Math fidelity only affects multiplication operations")
-
-    # MX formats REQUIRE implied_math_format=Yes on Quasar (bypass format inference pipeline)
-    if (
-        formats.input_format.is_mx_format()
-        and implied_math_format == ImpliedMathFormat.No
-    ):
-        pytest.skip("MX formats require implied_math_format=Yes on Quasar")
-
     num_tiles_per_accumulation = get_num_tiles_per_accumulation(acc_to_dest)
     total_tiles = (
         input_dimensions[0] * input_dimensions[1]
     ) // tile_shape.total_tile_size()
-
-    if (
-        acc_to_dest and total_tiles < num_tiles_per_accumulation
-    ) or total_tiles % num_tiles_per_accumulation != 0:
-        pytest.skip("Not enough tiles for dest accumulation")
 
     src_A, tile_cnt_A, src_B, _ = generate_stimuli_v2(
         stimuli_format_A=formats.input_format,

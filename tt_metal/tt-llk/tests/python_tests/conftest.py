@@ -331,6 +331,18 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
+    # Drop architecture-only tests on other architectures so they do not appear
+    # as skipped in verbose output (they are not collected at all).
+    arch = get_chip_architecture()
+    arch_markers = {
+        "blackhole_only": ChipArchitecture.BLACKHOLE,
+        "wormhole_only": ChipArchitecture.WORMHOLE,
+        "quasar_only": ChipArchitecture.QUASAR,
+    }
+    for marker, marker_arch in arch_markers.items():
+        if arch != marker_arch:
+            items[:] = [item for item in items if not item.get_closest_marker(marker)]
+
     test_order_file = config.getoption("--test-order-file")
 
     if not test_order_file:
@@ -678,3 +690,8 @@ skip_for_coverage = pytest.mark.skipif(
     "config.coverage_enabled",
     reason="Coverage shouldn't be ran with this test",
 )
+
+# Tests are removed at collection time on other architectures (see pytest_collection_modifyitems).
+blackhole_only = pytest.mark.blackhole_only
+wormhole_only = pytest.mark.wormhole_only
+quasar_only = pytest.mark.quasar_only

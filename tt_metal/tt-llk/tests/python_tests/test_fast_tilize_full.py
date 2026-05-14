@@ -9,9 +9,8 @@ Expected output: standard tilized tiles (4 faces of 16x16 per tile).
 Uses TilizeGolden from the existing test infrastructure.
 """
 
-import pytest
 import torch
-from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
+from conftest import blackhole_only
 from helpers.format_config import DataFormat, InputOutputFormat
 from helpers.golden_generators import TilizeGolden, get_golden_generator
 from helpers.llk_params import DestAccumulation, format_dict
@@ -36,6 +35,7 @@ TILE_R = 32
 TILE_C = 32
 
 
+@blackhole_only
 @parametrize(
     formats=[
         *input_output_formats([DataFormat.Float16_b], same=True),
@@ -59,9 +59,6 @@ TILE_C = 32
     ],
 )
 def test_fast_tilize_full(formats, dest_acc, dimensions):
-    if get_chip_architecture() != ChipArchitecture.BLACKHOLE:
-        pytest.skip("BH only")
-
     input_height_tiles, input_width_tiles = dimensions
     assert input_width_tiles >= 1, "ct_dim must be >= 1"
 
@@ -155,6 +152,7 @@ def test_fast_tilize_full(formats, dest_acc, dimensions):
 # Tests wide tile rows (20×4 to 120×4) to catch address overflow
 # or configuration bugs that only manifest with many tiles.
 # ============================================================
+@blackhole_only
 @parametrize(
     formats=[*input_output_formats([DataFormat.Float16_b], same=True)],
     dest_acc=[DestAccumulation.No],
@@ -171,9 +169,6 @@ def test_fast_tilize_full(formats, dest_acc, dimensions):
     ],
 )
 def test_fast_tilize_large(formats, dest_acc, dimensions):
-    if get_chip_architecture() != ChipArchitecture.BLACKHOLE:
-        pytest.skip("BH only")
-
     input_height_tiles, input_width_tiles = dimensions
     input_dimensions = [input_height_tiles * TILE_R, input_width_tiles * TILE_C]
     tile_count = input_height_tiles * input_width_tiles
@@ -229,6 +224,7 @@ def test_fast_tilize_large(formats, dest_acc, dimensions):
 # After tilize, checks the guard tile is all zeros (untouched).
 # Catches PACR_FLUSH overflow that writes beyond the last tile.
 # ============================================================
+@blackhole_only
 @parametrize(
     formats=[
         *input_output_formats([DataFormat.Float16_b], same=True),
@@ -246,9 +242,6 @@ def test_fast_tilize_large(formats, dest_acc, dimensions):
     ],
 )
 def test_fast_tilize_overflow_guard(formats, dest_acc, dimensions):
-    if get_chip_architecture() != ChipArchitecture.BLACKHOLE:
-        pytest.skip("BH only")
-
     input_height_tiles, input_width_tiles = dimensions
     input_dimensions = [input_height_tiles * TILE_R, input_width_tiles * TILE_C]
     tile_count = input_height_tiles * input_width_tiles

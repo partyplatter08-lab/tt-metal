@@ -1,11 +1,8 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-
-import pytest
 import torch
 from conftest import skip_for_blackhole, skip_for_coverage, skip_for_wormhole
-from helpers.chip_architecture import ChipArchitecture, get_chip_architecture
 from helpers.format_config import DataFormat
 from helpers.golden_generators import (
     MatmulGolden,
@@ -34,6 +31,18 @@ from helpers.tilize_untilize import tilize
 from helpers.utils import passed_test
 
 
+def _matmul_unary_sfpu_math_fidelities(mathop):
+    fidelities = [
+        MathFidelity.LoFi,
+        # MathFidelity.HiFi2, TODO: FIND OUT WHY
+        MathFidelity.HiFi3,
+        MathFidelity.HiFi4,
+    ]
+    if mathop == MathOperation.Square:
+        return [f for f in fidelities if f != MathFidelity.LoFi]
+    return fidelities
+
+
 # SFPI Issue link:
 # When some of these SPFU ops get compiled with coverage, `#pragma GCC unroll X` marked loops become invalid assembly
 @skip_for_coverage
@@ -53,24 +62,17 @@ from helpers.utils import passed_test
     mathop=[
         MathOperation.Abs,
         MathOperation.Celu,
-        MathOperation.Cos,
         # MathOperation.Gelu,
         MathOperation.Hardsigmoid,
         MathOperation.Log,
         MathOperation.Reciprocal,
         # MathOperation.Silu,
-        MathOperation.Sin,
         MathOperation.Sqrt,
         MathOperation.Square,
     ],
     approx_mode=[ApproximationMode.No, ApproximationMode.Yes],
     dest_acc=[DestAccumulation.Yes, DestAccumulation.No],
-    math_fidelity=[
-        MathFidelity.LoFi,
-        # MathFidelity.HiFi2, TODO: FIND OUT WHY
-        MathFidelity.HiFi3,
-        MathFidelity.HiFi4,
-    ],
+    math_fidelity=lambda mathop: _matmul_unary_sfpu_math_fidelities(mathop),
 )
 def test_matmul_and_unary_sfpu(
     test_name,
@@ -81,24 +83,6 @@ def test_matmul_and_unary_sfpu(
     math_fidelity,
 ):
     input_dimensions = [32, 32]
-
-    if mathop in [MathOperation.Cos, MathOperation.Sin]:
-        pytest.skip("Cos and Sin operations are not fully functional yet")
-    if mathop == MathOperation.Square and math_fidelity == MathFidelity.LoFi:
-        pytest.skip("Square operation in LoFi is not fully functional yet")
-    if (
-        formats.input_format == formats.output_format == DataFormat.Float16
-        and mathop
-        in [
-            MathOperation.Log,
-            MathOperation.Sqrt,
-            MathOperation.Square,
-            MathOperation.Hardsigmoid,
-        ]
-        and dest_acc == DestAccumulation.No
-        and get_chip_architecture() == ChipArchitecture.BLACKHOLE
-    ):
-        pytest.skip("BFP8 does not support Log and Reciprocal operations")
 
     torch_format = format_dict.get(formats.output_format)
     src_A, tile_cnt_A, src_B, tile_cnt_B = generate_stimuli_v2(
