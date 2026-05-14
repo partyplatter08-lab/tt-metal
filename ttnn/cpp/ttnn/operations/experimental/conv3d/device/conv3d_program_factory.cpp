@@ -238,6 +238,17 @@ Conv3dProgramFactory::cached_program_t Conv3dProgramFactory::create(
         input_tensor.buffer()->is_dram() &&
         input_tensor.buffer()->buffer_layout() == tt::tt_metal::TensorMemoryLayout::INTERLEAVED &&
         !input_tensor.buffer()->buffer_distribution_spec().has_value();
+    const uint32_t dram_alignment = tt::tt_metal::hal::get_dram_alignment();
+    const bool enable_dram_read_staging = input_is_dram_interleaved && (in_row_size_bytes % dram_alignment == 0) &&
+                                          (C_in_block_bytes % dram_alignment != 0);
+    const uint32_t dram_read_scratch_page_bytes =
+        enable_dram_read_staging ? tt::round_up(C_in_block_bytes + dram_alignment, dram_alignment) + dram_alignment : 0;
+    uint32_t cb_dram_read_scratch_id = 32;  // Invalid; set below if DRAM read staging is needed
+    if (enable_dram_read_staging) {
+        cb_dram_read_scratch_id = next_cb_index++;
+        tt::tt_metal::create_cb(
+            cb_dram_read_scratch_id, program, core_grid, dram_read_scratch_page_bytes, 1, data_format);
+    }
 
     // L1 pre-fetch buffer for kernels > 1x1x1 with no dilation.
     // Gathers the spatial receptive field from DRAM once per spatial block, then vol2col reads from L1.
@@ -253,6 +264,9 @@ Conv3dProgramFactory::cached_program_t Conv3dProgramFactory::create(
                                (tile_size * matmul_K_t * matmul_N_t) +          // weight_tiled
                                (partial_tile_size * matmul_M_t * matmul_N_t) +  // matmul_interm (may be fp32)
                                (tile_size * matmul_M_t * matmul_N_t);           // matmul_result_rm
+    if (enable_dram_read_staging) {
+        other_cbs_bytes += dram_read_scratch_page_bytes;
+    }
     if (C_in_num_blocks > 1) {
         other_cbs_bytes += partial_tile_size * matmul_M_t * matmul_N_t;  // reduction (same format as partials)
         other_cbs_bytes += tile_size;                                    // worker_ack
@@ -397,6 +411,13 @@ Conv3dProgramFactory::cached_program_t Conv3dProgramFactory::create(
         enable_streaming_output,
         out_subblock_h,
         out_subblock_w);
+    log_debug(
+        tt::LogOp,
+        "DRAM read staging: enable={}, alignment={}, scratch_page_bytes={}, cb_id={}",
+        enable_dram_read_staging,
+        dram_alignment,
+        dram_read_scratch_page_bytes,
+        cb_dram_read_scratch_id);
 
     /**
      * Compute parallelism for multi-core.
@@ -562,6 +583,9 @@ Conv3dProgramFactory::cached_program_t Conv3dProgramFactory::create(
     if (enable_coalesced_shard_reads) {
         gather_trids = 0;
     }
+    if (enable_dram_read_staging) {
+        gather_trids = 0;
+    }
     log_debug(
         tt::LogOp,
         "gather trid ring: bytes_per_tile={}, inner_burst={}, gather_trids={}",
@@ -608,7 +632,10 @@ Conv3dProgramFactory::cached_program_t Conv3dProgramFactory::create(
         patch_pad_bytes,
         gather_trids,
         static_cast<uint32_t>(enable_coalesced_shard_reads),
-        coalesced_scratch_rows};
+        coalesced_scratch_rows,
+        cb_dram_read_scratch_id,
+        static_cast<uint32_t>(enable_dram_read_staging),
+        dram_alignment};
     tt::tt_metal::TensorAccessorArgs(*input_tensor.buffer()).append_to(reader_compile_time_args);
 
     auto reader_kernels_id = CreateKernel(

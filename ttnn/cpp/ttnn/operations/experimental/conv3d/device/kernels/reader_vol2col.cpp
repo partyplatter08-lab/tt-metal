@@ -95,6 +95,80 @@ FORCE_INLINE void read_input_row(
         {.offset_bytes = dst_offset});
 }
 
+template <uint32_t dram_read_alignment, typename Reader, typename Dst, typename ScratchCB>
+FORCE_INLINE void read_input_row_staged_from_dram(
+    Noc noc,
+    const Reader& reader,
+    uint32_t page_idx,
+    uint32_t c_in_offset_bytes,
+    const Dst& dst,
+    uint32_t dst_offset,
+    uint32_t size_bytes,
+    const ScratchCB& scratch_cb) {
+    static_assert(Reader::DSpec::is_interleaved && Reader::DSpec::is_dram);
+    static_assert(dram_read_alignment > 0);
+    static_assert((dram_read_alignment & (dram_read_alignment - 1)) == 0);
+    constexpr uint32_t alignment_mask = dram_read_alignment - 1;
+
+    const uint64_t src_addr = reader.get_noc_addr(page_idx, c_in_offset_bytes, noc.get_noc_id());
+    const uint32_t dst_addr = dst.get_write_ptr() + dst_offset;
+    if ((static_cast<uint32_t>(src_addr) & alignment_mask) == (dst_addr & alignment_mask)) {
+        noc.async_read(
+            reader,
+            dst,
+            size_bytes,
+            {.page_id = page_idx, .offset_bytes = c_in_offset_bytes},
+            {.offset_bytes = dst_offset});
+        return;
+    }
+
+    const uint32_t src_align_offset = static_cast<uint32_t>(src_addr) & alignment_mask;
+    const uint64_t aligned_src_addr = src_addr - src_align_offset;
+    const uint32_t aligned_read_size = (src_align_offset + size_bytes + alignment_mask) & ~alignment_mask;
+
+    const uint32_t scratch_unaligned = scratch_cb.get_write_ptr();
+    const uint32_t scratch_l1_addr = (scratch_unaligned + alignment_mask) & ~alignment_mask;
+
+    noc_async_read<NOC_MAX_BURST_SIZE + 1, true>(
+        aligned_src_addr, scratch_l1_addr, aligned_read_size, noc.get_noc_id());
+    noc.async_read_barrier();
+
+    UnicastEndpoint self_ep;
+    noc.async_read(
+        self_ep,
+        dst,
+        size_bytes,
+        experimental::local_addr(scratch_l1_addr + src_align_offset, noc.get_noc_id()),
+        {.offset_bytes = dst_offset});
+    noc.async_read_barrier();
+}
+
+template <bool EnableDramReadStaging, uint32_t dram_read_alignment, typename Reader, typename Dst, typename ScratchCB>
+FORCE_INLINE void read_input_row_maybe_staged(
+    Noc noc,
+    const Reader& reader,
+    uint32_t page_idx,
+    uint32_t c_in_offset_bytes,
+    uint32_t in_row_size_bytes,
+    const Dst& dst,
+    uint32_t dst_offset,
+    uint32_t size_bytes,
+    const ScratchCB& scratch_cb) {
+    if constexpr (Reader::DSpec::tensor_shape_static) {
+        if constexpr ((reader.dspec().rank() > 1) && (reader.dspec().tensor_shape()[1] > 1)) {
+            read_input_row(noc, reader, page_idx, c_in_offset_bytes, in_row_size_bytes, dst, dst_offset, size_bytes);
+            return;
+        }
+    }
+
+    if constexpr (EnableDramReadStaging && Reader::DSpec::is_interleaved && Reader::DSpec::is_dram) {
+        read_input_row_staged_from_dram<dram_read_alignment>(
+            noc, reader, page_idx, c_in_offset_bytes, dst, dst_offset, size_bytes, scratch_cb);
+    } else {
+        read_input_row(noc, reader, page_idx, c_in_offset_bytes, in_row_size_bytes, dst, dst_offset, size_bytes);
+    }
+}
+
 // Manages chunked CB writes: reserves TILE_HEIGHT pages, tracks patches written,
 // pushes when full, and flushes remaining at the end of a block.
 template <uint32_t cb_id, uint32_t padded_page_bytes, uint32_t patch_pad_bytes>
@@ -237,8 +311,7 @@ template <
     uint32_t kW,
     uint32_t stride_w,
     typename ShardCB>
-void shift_retained_w_columns(
-    Noc noc, const ShardCB& shard_cb, uint32_t T_shard_cur, uint32_t h_rows_gathered) {
+void shift_retained_w_columns(Noc noc, const ShardCB& shard_cb, uint32_t T_shard_cur, uint32_t h_rows_gathered) {
     constexpr uint32_t overlap_w = kW > stride_w ? kW - stride_w : 0;
     constexpr uint32_t shift_bytes = overlap_w * C_in_block_bytes;
     constexpr uint32_t src_off = (W_shard_max - overlap_w) * C_in_block_bytes;
@@ -287,12 +360,16 @@ template <
     uint32_t in_row_size_bytes,
     bool check_padding,
     uint32_t N_TRIDS,
+    bool EnableDramReadStaging,
+    uint32_t dram_read_alignment,
     typename Reader,
-    typename ShardCB>
+    typename ShardCB,
+    typename ScratchCB>
 void gather_rows_to_shard(
     Noc noc,
     const Reader& in_reader,
     const ShardCB& shard_cb,
+    const ScratchCB& dram_read_scratch_cb,
     uint32_t batch_page_base,
     uint32_t c_in_offset_bytes,
     int32_t t_shard_start,
@@ -324,7 +401,8 @@ void gather_rows_to_shard(
     // post-loop drain of N_TRIDS barriers is wasted.  Floor at 2 * N_TRIDS reads.
     constexpr uint32_t kGatherFastPathReadCutoff = 2 * N_TRIDS;
     const uint32_t total_reads_estimate = T_shard_cur * (h_end - h_start) * w_count;
-    [[maybe_unused]] const bool use_ring = (N_TRIDS != 0) && (total_reads_estimate >= kGatherFastPathReadCutoff);
+    [[maybe_unused]] const bool use_ring =
+        !EnableDramReadStaging && (N_TRIDS != 0) && (total_reads_estimate >= kGatherFastPathReadCutoff);
     [[maybe_unused]] uint32_t issued = 0;
     for (uint32_t t_local = 0; t_local < T_shard_cur; t_local++) {
         const int32_t t_in = t_shard_start + static_cast<int32_t>(t_local);
@@ -363,7 +441,7 @@ void gather_rows_to_shard(
                             const uint32_t page_idx = batch_page_base + static_cast<uint32_t>(t_clamped) * H_in_W_in +
                                                       static_cast<uint32_t>(h_clamped) * W_in +
                                                       static_cast<uint32_t>(w_clamped);
-                            read_input_row(
+                            read_input_row_maybe_staged<EnableDramReadStaging, dram_read_alignment>(
                                 noc,
                                 in_reader,
                                 page_idx,
@@ -371,12 +449,13 @@ void gather_rows_to_shard(
                                 in_row_size_bytes,
                                 shard_cb,
                                 shard_offset,
-                                C_in_block_bytes);
+                                C_in_block_bytes,
+                                dram_read_scratch_cb);
                         }
                     } else {
                         const uint32_t page_idx = batch_page_base + static_cast<uint32_t>(t_in) * H_in_W_in +
                                                   static_cast<uint32_t>(h_in) * W_in + static_cast<uint32_t>(w_in);
-                        read_input_row(
+                        read_input_row_maybe_staged<EnableDramReadStaging, dram_read_alignment>(
                             noc,
                             in_reader,
                             page_idx,
@@ -384,13 +463,14 @@ void gather_rows_to_shard(
                             in_row_size_bytes,
                             shard_cb,
                             shard_offset,
-                            C_in_block_bytes);
+                            C_in_block_bytes,
+                            dram_read_scratch_cb);
                     }
                 } else {
                     // Fast path: no padding checks
                     const uint32_t page_idx = batch_page_base + static_cast<uint32_t>(t_in) * H_in_W_in +
                                               static_cast<uint32_t>(h_in) * W_in + static_cast<uint32_t>(w_in);
-                    read_input_row(
+                    read_input_row_maybe_staged<EnableDramReadStaging, dram_read_alignment>(
                         noc,
                         in_reader,
                         page_idx,
@@ -398,7 +478,8 @@ void gather_rows_to_shard(
                         in_row_size_bytes,
                         shard_cb,
                         shard_offset,
-                        C_in_block_bytes);
+                        C_in_block_bytes,
+                        dram_read_scratch_cb);
                 }
                 if constexpr (N_TRIDS != 0) {
                     if (use_ring) {
@@ -547,12 +628,16 @@ template <
     uint32_t in_row_size_bytes,
     uint32_t GatherTrids,
     bool EnableCoalescedShardReads,
+    bool EnableDramReadStaging,
+    uint32_t dram_read_alignment,
     typename Reader,
-    typename ShardCB>
+    typename ShardCB,
+    typename ScratchCB>
 void gather_rows_to_shard_selected(
     Noc noc,
     const Reader& in_reader,
     const ShardCB& shard_cb,
+    const ScratchCB& dram_read_scratch_cb,
     [[maybe_unused]] uint32_t shard_l1_base,
     [[maybe_unused]] uint32_t coalesced_scratch_offset,
     bool all_in_bounds,
@@ -614,10 +699,13 @@ void gather_rows_to_shard_selected(
             H_in_W_in,
             in_row_size_bytes,
             decltype(check_padding_v)::value,
-            GatherTrids>(
+            GatherTrids,
+            EnableDramReadStaging,
+            dram_read_alignment>(
             noc,
             in_reader,
             shard_cb,
+            dram_read_scratch_cb,
             batch_page_base,
             c_in_offset_bytes,
             t_shard_start,
@@ -680,6 +768,9 @@ void kernel_main() {
     constexpr uint32_t gather_trids = get_compile_time_arg_val(36);
     constexpr bool enable_coalesced_shard_reads = get_compile_time_arg_val(37) == 1;
     constexpr uint32_t coalesced_scratch_rows = get_compile_time_arg_val(38);
+    constexpr uint32_t cb_dram_read_scratch = get_compile_time_arg_val(39);
+    constexpr bool enable_dram_read_staging = get_compile_time_arg_val(40) == 1;
+    constexpr uint32_t dram_read_alignment = get_compile_time_arg_val(41);
     constexpr uint32_t padded_page_bytes = kT * kH * kW * C_in_block_bytes + patch_pad_bytes;
 
     // Load input/output addresses and range parameters
@@ -697,7 +788,7 @@ void kernel_main() {
     const uint32_t w_out_end = get_arg_val<uint32_t>(argidx++);
 
     // Tensor accessor for input tensor
-    constexpr auto in_args = TensorAccessorArgs<39>();
+    constexpr auto in_args = TensorAccessorArgs<42>();
     const auto in_reader = TensorAccessor(in_args, in_addr);
 
     Noc noc;
@@ -713,6 +804,10 @@ void kernel_main() {
 
     // Reserve shard buffer once (used as scratch space, not streaming CB)
     experimental::CB shard_cb(cb_input_shard);
+    experimental::CB dram_read_scratch_cb(cb_dram_read_scratch);
+    if constexpr (enable_dram_read_staging) {
+        dram_read_scratch_cb.reserve_back(1);
+    }
     uint32_t shard_l1_base = 0;
     if constexpr (use_l1_prefetch) {
         constexpr uint32_t shard_total = T_shard_max * H_shard_max_W_shard_max;
@@ -804,10 +899,13 @@ void kernel_main() {
                                         H_in_W_in,
                                         in_row_size_bytes,
                                         gather_trids,
-                                        enable_coalesced_shard_reads>(
+                                        enable_coalesced_shard_reads,
+                                        enable_dram_read_staging,
+                                        dram_read_alignment>(
                                         noc,
                                         in_reader,
                                         shard_cb,
+                                        dram_read_scratch_cb,
                                         shard_l1_base,
                                         coalesced_scratch_offset,
                                         shard_all_in_bounds,
@@ -847,10 +945,13 @@ void kernel_main() {
                                                 H_in_W_in,
                                                 in_row_size_bytes,
                                                 gather_trids,
-                                                enable_coalesced_shard_reads>(
+                                                enable_coalesced_shard_reads,
+                                                enable_dram_read_staging,
+                                                dram_read_alignment>(
                                                 noc,
                                                 in_reader,
                                                 shard_cb,
+                                                dram_read_scratch_cb,
                                                 shard_l1_base,
                                                 coalesced_scratch_offset,
                                                 shard_all_in_bounds,
@@ -940,7 +1041,9 @@ void kernel_main() {
                                                             batch_page_base + static_cast<uint32_t>(t_idx) * H_in_W_in +
                                                             static_cast<uint32_t>(h_idx) * W_in +
                                                             static_cast<uint32_t>(w_idx);
-                                                        read_input_row(
+                                                        read_input_row_maybe_staged<
+                                                            enable_dram_read_staging,
+                                                            dram_read_alignment>(
                                                             noc,
                                                             in_reader,
                                                             page_idx,
@@ -948,7 +1051,8 @@ void kernel_main() {
                                                             in_row_size_bytes,
                                                             chunk.cb,
                                                             chunk.write_offset,
-                                                            C_in_block_bytes);
+                                                            C_in_block_bytes,
+                                                            dram_read_scratch_cb);
                                                         chunk.write_offset += C_in_block_bytes;
                                                     }
                                                 }
