@@ -200,16 +200,6 @@ inline void eltwise_unary_configure_addrmod(const std::uint32_t dst_format)
             .dest = {.incr = 8},
         }
             .set(ADDR_MOD_2);
-
-        if constexpr (bcast_type != BroadcastType::NONE)
-        {
-            addr_mod_t {
-                .srca = {.incr = 0},
-                .srcb = {.incr = 0},
-                .dest = {.incr = 0},
-            }
-                .set(ADDR_MOD_3);
-        }
     }
     else
     {
@@ -259,6 +249,16 @@ inline void eltwise_unary_configure_addrmod(const std::uint32_t dst_format)
                     .set(ADDR_MOD_2);
             }
         }
+    }
+
+    if constexpr (bcast_type != BroadcastType::NONE)
+    {
+        addr_mod_t {
+            .srca = {.incr = 0},
+            .srcb = {.incr = 0},
+            .dest = {.incr = 0},
+        }
+            .set(ADDR_MOD_3);
     }
 }
 
