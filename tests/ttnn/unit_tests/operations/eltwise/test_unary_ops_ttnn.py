@@ -952,6 +952,7 @@ def test_unary_celu(input_shapes, param, device):
 )
 @pytest.mark.parametrize("ttnn_dtype", [ttnn.bfloat16, ttnn.float32])
 def test_unary_comp_ops(ttnn_op, ttnn_dtype, device):
+    dtype = torch.float32 if ttnn_dtype == ttnn.float32 else torch.bfloat16
     tor_a = torch.tensor(
         [
             [
@@ -965,7 +966,7 @@ def test_unary_comp_ops(ttnn_op, ttnn_dtype, device):
                 float("inf"),
             ]
         ],
-        dtype=torch.float32,
+        dtype=dtype,
     )
 
     torch_input = tor_a.repeat(32, 4)
@@ -976,7 +977,5 @@ def test_unary_comp_ops(ttnn_op, ttnn_dtype, device):
         torch_input, dtype=ttnn_dtype, layout=ttnn.TILE_LAYOUT, device=device, memory_config=ttnn.L1_MEMORY_CONFIG
     )
     result = ttnn_op(tt_a)
-
     tt_res = ttnn.to_torch(result)
-
-    assert torch.equal(tt_res.to(torch.bool), tor_res)
+    assert torch.equal(tt_res, tor_res)
